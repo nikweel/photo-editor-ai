@@ -43,6 +43,7 @@ Two buttons on the **Auto · AI** tab: **exposure + colour** or **exposure only*
 ## Filters and packs
 **60 built-in filters in 9 packs**: Basic, Portrait, Landscape, Street & City, Film & Vintage, Black & White, Food, Dark & Moody, and looks tuned numerically from before/after pairs.
 - **Group** by *packs*, by *type* (Portrait, Landscape, B&W, Cinema, Film, …) or as a flat list; **search** by name, pack or type.
+- **Live thumbnails:** every filter in the list is previewed on your current photo, so you pick by eye, not by name.
 - A **strength** slider mixes the filter with the original.
 - **Save your own** filter into your own pack (a new pack is created on the fly) with a type of your choice.
 - **Share:** export one filter or a **whole pack** as a single `.pack.json`; *Import…* adds filters, packs and `.cube` LUTs. Imported files are validated and LUT paths from untrusted files are ignored.

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 from PySide6.QtCore import QByteArray, QSize, Qt, QThread, QTimer, QUrl, Signal
-from PySide6.QtGui import QColor, QDesktopServices, QImage, QKeySequence, QShortcut
+from PySide6.QtGui import QColor, QDesktopServices, QIcon, QImage, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (QComboBox, QFileDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox,
                                QPushButton, QSlider, QTabWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
@@ -14,7 +14,7 @@ from ..ai.auto import suggest
 from ..ai.registry import Engine, add_custom, download_model, is_available, models, remove_custom
 from ..core import adjust
 from ..core.adjust import CHANNELS, HSL_COLORS, EditParams
-from ..core.imageio import open_image, open_preview, to_array
+from ..core.imageio import from_array, open_image, open_preview, to_array
 from ..services.batch import collect_files
 from ..services.export import ExportOptions, export_image
 from ..services.filters import DEFAULT_CATEGORY, MY_PACK, FilterStore, blend, category_order
@@ -178,6 +178,27 @@ class HqWorker(QThread):
             log.exception("Ошибка чёткой перерисовки")
 
 
+PREVIEW_W, PREVIEW_H = 56, 38  # размер значка фильтра в списке; считается вдвое крупнее для чёткости
+
+
+class FilterPreviewWorker(QThread):
+    """Фильтры, применённые к крошечной копии текущего фото, — для значков в списке. Идёт в фоне: на все 60 фильтров меньше секунды."""
+    ready = Signal(int, object, object)  # номер запуска, ключ фильтра, QImage
+
+    def __init__(self, gen: int, base: np.ndarray, items: list):
+        super().__init__()
+        self.gen, self.base, self.items = gen, base, items
+
+    def run(self):
+        for key, params in self.items:
+            if self.isInterruptionRequested():
+                return
+            try:
+                self.ready.emit(self.gen, key, qimage_from_array(adjust.apply(self.base, params)))
+            except Exception:
+                log.exception("Превью фильтра %s", key)
+
+
 class DownloadWorker(QThread):
     progress = Signal(float, str)
     done = Signal(str)
@@ -241,6 +262,10 @@ class MainWindow(QMainWindow):
         self.store = FilterStore()
         self.active_filter = None
         self.sliders: dict[str, tuple[QSlider, QLabel, int, str, int]] = {}
+        self._fprev: dict = {}          # (пакет, имя) -> значок фильтра на текущем фото
+        self._fitems: dict = {}         # (пакет, имя) -> элемент дерева
+        self._fprev_gen = 0
+        self._fprev_workers: list[FilterPreviewWorker] = []
         self._sec_keys: dict = {}  # раздел -> какие параметры он содержит (для сброса и пометки «изменён»)
         self.history: list[dict] = []  # снимки параметров для отмены/повтора
         self.hidx = -1
@@ -720,8 +745,9 @@ class MainWindow(QMainWindow):
         top.addWidget(self.fsearch, 1)
         self.ftree = QTreeWidget()
         self.ftree.setHeaderHidden(True)
+        self.ftree.setIconSize(QSize(PREVIEW_W, PREVIEW_H))
         self.ftree.setIndentation(14)
-        self.ftree.setUniformRowHeights(True)
+        self.ftree.setUniformRowHeights(False)  # у строк со значками высота больше, чем у заголовков групп
         self.ftree.currentItemChanged.connect(lambda cur, _prev: self._filter_picked(cur))
         self.ftree.itemExpanded.connect(lambda it: self._group_open(it, True))
         self.ftree.itemCollapsed.connect(lambda it: self._group_open(it, False))
@@ -759,6 +785,45 @@ class MainWindow(QMainWindow):
         self._filter_list()
         return w
 
+    def _filter_icon(self, key) -> QIcon:
+        pm = self._fprev.get(key)
+        if pm is None:  # пока значок не готов — пустое место того же размера, чтобы строки не прыгали
+            pm = QPixmap(PREVIEW_W, PREVIEW_H)
+            pm.fill(Qt.transparent)
+        return QIcon(pm)
+
+    def _start_previews(self):
+        """Запустить расчёт значков для фильтров без значка. Старый расчёт прерывается: фото могло смениться."""
+        self._fprev_workers = [w for w in self._fprev_workers if w.isRunning()]
+        for w in self._fprev_workers:
+            w.requestInterruption()
+        self._fprev_gen += 1
+        if self.preview_tiny is None:
+            return
+        todo = [((f.pack, f.name), f.params) for f in self.filters if (f.pack, f.name) not in self._fprev]
+        if not todo:
+            return
+        im = from_array(self.preview_tiny)
+        w2, h2 = PREVIEW_W * 2, PREVIEW_H * 2
+        k = max(w2 / im.width, h2 / im.height)  # масштаб «заполнить» и обрезка по центру до пропорций значка
+        im = im.resize((max(w2, round(im.width * k)), max(h2, round(im.height * k))))
+        left, top = (im.width - w2) // 2, (im.height - h2) // 2
+        base = to_array(im.crop((left, top, left + w2, top + h2)))
+        worker = FilterPreviewWorker(self._fprev_gen, base, todo)
+        worker.ready.connect(self._preview_ready)
+        self._fprev_workers.append(worker)
+        worker.start()
+
+    def _preview_ready(self, gen: int, key, qimg):
+        if gen != self._fprev_gen:  # результат прерванного расчёта (другое фото)
+            return
+        pm = QPixmap.fromImage(qimg)
+        pm.setDevicePixelRatio(2)
+        self._fprev[key] = pm
+        it = self._fitems.get(key)
+        if it is not None:
+            it.setIcon(0, QIcon(pm))
+
     def _group_open(self, item, on: bool):
         kind, val = item.data(0, Qt.UserRole) or (None, None)
         if kind in ("p", "c"):
@@ -780,10 +845,15 @@ class MainWindow(QMainWindow):
         q = self.fsearch.text().strip().lower()
         match = lambda f: not q or q in f.name.lower() or q in f.pack.lower() or q in f.category.lower()
 
+        self._fitems = {}
+
         def leaf(f) -> QTreeWidgetItem:
             it = QTreeWidgetItem([f.name + ("" if f.builtin else "  ★")])
             it.setData(0, Qt.UserRole, ("f", index[id(f)]))
             it.setToolTip(0, f"{f.pack} · {f.category}")
+            key = (f.pack, f.name)
+            it.setIcon(0, self._filter_icon(key))
+            self._fitems[key] = it
             return it
 
         self.ftree.blockSignals(True)
@@ -823,6 +893,7 @@ class MainWindow(QMainWindow):
                     target = it
                     break
         self.ftree.blockSignals(False)
+        self._start_previews()  # значки для фильтров, у которых их ещё нет (новый фильтр, новое фото)
         if target is not None:
             if target.parent() is not None:
                 target.parent().setExpanded(True)
@@ -1196,7 +1267,9 @@ class MainWindow(QMainWindow):
         self._save_edit()
         settings.put("geometry", bytes(self.saveGeometry().toBase64()).decode())
         self.strip.shutdown()
-        for w in (self.worker, self.export_worker, self.hq_worker):
+        for w in self._fprev_workers:
+            w.requestInterruption()  # значки фильтров не нужно дорисовывать при закрытии
+        for w in (*self._fprev_workers, self.worker, self.export_worker, self.hq_worker):
             if w and w.isRunning():
                 w.wait(8000)
         super().closeEvent(ev)
@@ -1223,6 +1296,7 @@ class MainWindow(QMainWindow):
         tiny.thumbnail((TINY_SIDE, TINY_SIDE))
         self.preview_tiny = to_array(tiny) if max(tiny.size) < max(small.size) else self.preview_small
         self._before_key = None
+        self._fprev.clear()  # значки фильтров зависят от фото
         self.curve.set_histogram(self.preview)
         e = self.lib.get(path)
         self.params = EditParams.from_dict(e.params) if e and e.params else EditParams()
@@ -1235,6 +1309,7 @@ class MainWindow(QMainWindow):
         self._history_reset()
         self.render()
         self.canvas.fit()
+        self._filter_list()  # перестроить дерево со значками на этом фото
         self.strip.select_path(path)
         self.setWindowTitle(f"Photo Editor AI — {path.name}")
         self.info.setText(f"{path.name}  ·  {self.full_size[0]}×{self.full_size[1]}")
