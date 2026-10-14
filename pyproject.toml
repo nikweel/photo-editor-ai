@@ -1,0 +1,34 @@
+[project]
+name = "photo-editor-ai"
+version = "0.1.0"
+description = "Free, open-source photo editor with AI auto-correction, tone curves, HSL, filter packs, batch processing and Lightroom-style library. Ubuntu first."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Nikolay Fedotov" }]
+keywords = ["photo-editor", "image-processing", "onnx", "pyside6", "color-grading"]
+requires-python = ">=3.10,<3.13"
+
+dependencies = [
+    "onnxruntime>=1.18; sys_platform == 'linux' or sys_platform == 'darwin'",
+    "onnxruntime-directml>=1.18; sys_platform == 'win32'",
+    "pillow>=10.0",
+    "rawpy>=0.21",
+    "numpy>=1.26",
+    "PySide6-Essentials>=6.6",
+]
+
+[project.urls]
+Homepage = "https://github.com/nikweel/photo-editor-ai"
+Issues = "https://github.com/nikweel/photo-editor-ai/issues"
+
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = ["pytest", "onnx"]
+# только для scripts/fit_filters.py (подгонка фильтров по парам «до/после»)
+fit = ["scipy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

@@ -1,0 +1,14 @@
+/runtime/
+/models/
+/data/
+__pycache__/
+*.pyc
+.pytest_cache/
+/dist/
+/build/
+/release/
+.venv/
+.claude/
+*.egg-info/
+.DS_Store
+tasks/
