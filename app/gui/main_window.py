@@ -1,6 +1,5 @@
 import copy
 import logging
-import re
 import time
 from pathlib import Path
 
@@ -19,6 +18,7 @@ from ..services.batch import collect_files
 from ..services.export import ExportOptions, export_image
 from ..services.filters import DEFAULT_CATEGORY, MY_PACK, FilterStore, blend, category_order
 from ..services.library import Library
+from ..utils.numbers import parse_number
 from ..utils import settings
 from .batch_dialog import BatchDialog
 from .canvas import CompareCanvas
@@ -1031,23 +1031,15 @@ class MainWindow(QMainWindow):
         self._hsl_sync()
         self._mark_sections()
 
-    @staticmethod
-    def _parse_number(text: str) -> float | None:
-        """Число из строки, которую ввёл пользователь: «+0,5», «12 %», «-3.2°»."""
-        m = re.search(r"[-+−]?\s*(?:\d+[.,]?\d*|[.,]\d+)", text)  # первое число; «−» — типографский минус
-        if not m:
-            return None
-        return float(m.group().replace(" ", "").replace(",", ".").replace("−", "-"))
-
     def _value_typed(self, key: str, text: str):
         s, val, div, fmt, mul = self.sliders[key]
-        v = self._parse_number(text)
+        v = parse_number(text)
         if v is not None:
             s.setValue(round(v / mul * div))  # QSlider сам ограничивает значение диапазоном ползунка
         self._sync_ui()  # вернуть корректный текст (и после неверного ввода)
 
     def _hsl_typed(self, i: int, text: str):
-        v = self._parse_number(text)
+        v = parse_number(text)
         if v is not None:
             self.hsl_sliders[i][0].setValue(round(v))
         self._hsl_sync()
