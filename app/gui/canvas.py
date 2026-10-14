@@ -25,6 +25,7 @@ class CompareCanvas(QWidget):
         self.message = ""
         self.before: QImage | None = None
         self.after: QImage | None = None
+        self.overlay: QImage | None = None  # индикатор пересветов и провалов поверх «после»
         self.source_width = 0          # ширина показанного кадра в пикселях оригинала (для процента зума)
         self.compare = False
         self.split = 0.5               # доля ширины изображения
@@ -44,6 +45,10 @@ class CompareCanvas(QWidget):
     def set_pair(self, before: QImage, after: QImage):
         self.before, self.after = before, after
         self._clamp_center()  # размер кадра мог измениться (поворот, кадрирование)
+        self.update()
+
+    def set_overlay(self, img: QImage | None):
+        self.overlay = img
         self.update()
 
     def set_compare(self, on: bool):
@@ -104,11 +109,13 @@ class CompareCanvas(QWidget):
         self.update()
         self.view_changed.emit()
 
-    def _draw(self, p: QPainter, img: QImage, r: QRectF, clip_x: float | None = None):
+    def _draw(self, p: QPainter, img: QImage, r: QRectF, clip_x: float | None = None, clip_left: float | None = None):
         """Рисует видимую часть img в прямоугольник r (без масштабирования всей картинки при большом зуме)."""
         vis = r.intersected(QRectF(self.rect()))
         if clip_x is not None:
             vis = vis.intersected(QRectF(-1e6, -1e6, clip_x + 1e6, 2e6))
+        if clip_left is not None:
+            vis = vis.intersected(QRectF(clip_left, -1e6, 1e7, 2e6))
         if vis.width() <= 0 or vis.height() <= 0:
             return
         k = img.width() / r.width()
@@ -124,6 +131,8 @@ class CompareCanvas(QWidget):
         p.setRenderHint(QPainter.SmoothPixmapTransform)
         r = self._rect()
         self._draw(p, self.after, r)
+        if self.overlay is not None and not self.crop_mode:  # пересветы и провалы; при сравнении — только на стороне «после»
+            self._draw(p, self.overlay, r, clip_left=(r.left() + r.width() * self.split) if self.compare else None)
         if self.crop_mode:
             self._paint_crop(p, r)
         elif self.compare:

@@ -1,7 +1,9 @@
 import numpy as np
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import QFrame, QLabel, QSizePolicy, QSlider, QToolButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLineEdit, QSizePolicy, QSlider, QToolButton, QVBoxLayout, QWidget
+
+from .icons import icon
 
 from .theme import ACCENT, BG, BORDER
 
@@ -53,7 +55,7 @@ class UniSlider(QSlider):
 class Section(QFrame):
     """Сворачиваемый раздел панели (как в Lightroom). Свёрнутый раздел занимает одну строку."""
 
-    def __init__(self, title: str, expanded: bool = True):
+    def __init__(self, title: str, expanded: bool = True, on_reset=None):
         super().__init__()
         self.head = QToolButton()
         self.head.setText(title.upper())
@@ -62,6 +64,7 @@ class Section(QFrame):
         self.head.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.head.setArrowType(Qt.DownArrow if expanded else Qt.RightArrow)
         self.head.setCursor(Qt.PointingHandCursor)
+        self.head.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)  # в строке с кнопкой сброса заголовок занимает всё свободное место
         self.head.setStyleSheet("QToolButton { border: none; color: #9a9aa4; font-size: 8pt; font-weight: 600; letter-spacing: 1px;"
                                 " text-align: left; padding: 6px 2px; } QToolButton:hover { color: #e8e8ec; }")
         self.body = QWidget()
@@ -69,13 +72,38 @@ class Section(QFrame):
         self.body_lay = QVBoxLayout(self.body)
         self.body_lay.setContentsMargins(2, 0, 2, 6)
         self.body_lay.setSpacing(2)
+        self.mark = QLabel("●")  # точка: в разделе есть изменения
+        self.mark.setStyleSheet("color: #4c8dff; font-size: 7pt;")
+        self.mark.setToolTip("В этом разделе есть изменения")
+        self.mark.setVisible(False)
+        self.reset_btn = QToolButton()
+        self.reset_btn.setIcon(icon("reset", 14))
+        self.reset_btn.setAutoRaise(True)
+        self.reset_btn.setCursor(Qt.PointingHandCursor)
+        self.reset_btn.setToolTip("Сбросить раздел (можно отменить: Ctrl+Z)")
+        self.reset_btn.setStyleSheet("QToolButton { border: none; padding: 3px; border-radius: 4px; } QToolButton:hover { background: #2b2b30; }")
+        self.reset_btn.setVisible(on_reset is not None)
+        self.reset_btn.setEnabled(False)
+        if on_reset is not None:
+            self.reset_btn.clicked.connect(lambda: on_reset())
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(4)
+        row.addWidget(self.head, 1)
+        row.addWidget(self.mark)
+        row.addWidget(self.reset_btn)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
-        lay.addWidget(self.head)
+        lay.addLayout(row)
         lay.addWidget(self.body)
         self.head.toggled.connect(self._toggle)
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)  # раздел не растёт сверх содержимого: свободное место уходит вниз
+
+    def set_modified(self, on: bool):
+        """Пометка «изменён» и доступность кнопки сброса."""
+        self.mark.setVisible(on)
+        self.reset_btn.setEnabled(on)
 
     def _toggle(self, on: bool):
         self.head.setArrowType(Qt.DownArrow if on else Qt.RightArrow)
@@ -85,13 +113,57 @@ class Section(QFrame):
         (self.body_lay.addLayout if hasattr(w, "addWidget") else self.body_lay.addWidget)(w)
 
 
+class ValueEdit(QLineEdit):
+    """Число рядом с ползунком: выглядит как подпись, по клику становится полем ввода (Enter — применить, Esc — отмена)."""
+    committed = Signal(str)
+
+    def __init__(self):
+        super().__init__()
+        self.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.setProperty("value", True)
+        self.setFixedWidth(56)
+        self._orig = ""
+        self.editingFinished.connect(self._finished)
+
+    def focusInEvent(self, e):
+        self._orig = self.text()
+        super().focusInEvent(e)
+        QTimer.singleShot(0, self.selectAll)
+
+    def keyPressEvent(self, e):
+        if e.key() == Qt.Key_Escape:  # отмена ввода
+            self.setText(self._orig)
+            self.clearFocus()
+            return
+        super().keyPressEvent(e)
+
+    def _finished(self):
+        if self.text() != self._orig:
+            self.committed.emit(self.text())
+        self.clearFocus()
+
+
 class HistogramWidget(QWidget):
-    """Гистограмма текущего результата: R, G, B наложены друг на друга."""
+    """Гистограмма текущего результата: R, G, B наложены друг на друга. В углу — переключатель индикатора пересветов и провалов."""
+    clip_toggled = Signal(bool)
 
     def __init__(self):
         super().__init__()
         self.setFixedHeight(84)
         self.h: np.ndarray | None = None
+        self.clip_btn = QToolButton(self)
+        self.clip_btn.setIcon(icon("clip", 14))
+        self.clip_btn.setCheckable(True)
+        self.clip_btn.setAutoRaise(True)
+        self.clip_btn.setCursor(Qt.PointingHandCursor)
+        self.clip_btn.setToolTip("Показать пересветы (красным) и провалы в тенях (синим) на фото — J")
+        self.clip_btn.setStyleSheet("QToolButton { border: none; padding: 3px; border-radius: 4px; } QToolButton:hover { background: #2b2b30; }"
+                                    " QToolButton:checked { background: #4c8dff; }")
+        self.clip_btn.toggled.connect(self.clip_toggled.emit)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self.clip_btn.move(self.width() - self.clip_btn.sizeHint().width() - 8, 8)
 
     def set_image(self, img: np.ndarray | None):
         if img is None:

@@ -1,5 +1,6 @@
 import copy
 import logging
+import re
 import time
 from pathlib import Path
 
@@ -27,7 +28,7 @@ from .filter_dialogs import SaveFilterDialog
 from .filmstrip import Filmstrip
 from .icons import icon
 from .import_dialog import ImportDialog
-from .widgets import BipolarSlider, HistogramWidget, Section, UniSlider
+from .widgets import BipolarSlider, HistogramWidget, Section, UniSlider, ValueEdit
 
 log = logging.getLogger(__name__)
 PREVIEW_SIDE = 2400   # правки в окне считаются на уменьшенной копии, при экспорте — на оригинале
@@ -79,6 +80,8 @@ HELP = """<table cellspacing=6>
 <tr><td><b>Ctrl+I</b></td><td>Импорт фото</td></tr>
 <tr><td><b>Ctrl+U</b></td><td>ИИ-автокоррекция (экспозиция и цвет)</td></tr>
 <tr><td><b>F</b></td><td>Режим «фокус»: скрыть панели и ленту</td></tr>
+<tr><td><b>J</b></td><td>Показать пересветы (красным) и провалы (синим)</td></tr>
+<tr><td><b>Клик по числу</b></td><td>Ввести значение ползунка с клавиатуры (Enter — применить, Esc — отмена)</td></tr>
 <tr><td><b>Ctrl+S</b></td><td>Экспорт</td></tr>
 <tr><td><b>Ctrl+Z / Ctrl+Shift+Z</b></td><td>Отменить / повторить</td></tr>
 <tr><td><b>\\</b></td><td>Сравнение «До / После»</td></tr>
@@ -143,21 +146,34 @@ def qimage_from_array(img: np.ndarray) -> QImage:
     return QImage(a.data, w, h, 3 * w, QImage.Format_RGB888).copy()
 
 
+def clip_overlay(out: np.ndarray) -> QImage | None:
+    """Прозрачная картинка с пересветами (красным) и провалами в тенях (синим); None, если таких пикселей нет."""
+    mx = out.max(-1)
+    hi, lo = mx >= 0.995, mx <= 0.004
+    if not (hi.any() or lo.any()):
+        return None
+    a = np.zeros(out.shape[:2] + (4,), np.uint8)
+    a[hi] = (255, 60, 60, 175)
+    a[lo] = (70, 130, 255, 175)
+    h, w = mx.shape
+    return QImage(a.data, w, h, 4 * w, QImage.Format_RGBA8888).copy()
+
+
 class HqWorker(QThread):
     """Чёткая перерисовка в отдельном потоке, чтобы окно не замирало на тяжёлых фильтрах. Результат с устаревшим номером отбрасывается."""
-    done = Signal(int, object, object, object, int)  # номер, ключ «до», «до» (или None), «после», ширина кадра в пикселях оригинала
+    done = Signal(int, object, object, object, int, object)  # номер, ключ «до», «до» (или None), «после», ширина кадра в пикселях оригинала, индикатор пересветов
 
-    def __init__(self, gen: int, key, src: np.ndarray, params: EditParams, crop_mode: bool, need_before: bool, full_side: int):
+    def __init__(self, gen: int, key, src: np.ndarray, params: EditParams, crop_mode: bool, need_before: bool, full_side: int, show_clip: bool):
         super().__init__()
-        self.args = (gen, key, src, params, crop_mode, need_before, full_side)
+        self.args = (gen, key, src, params, crop_mode, need_before, full_side, show_clip)
 
     def run(self):
-        gen, key, src, params, crop_mode, need_before, full_side = self.args
+        gen, key, src, params, crop_mode, need_before, full_side, show_clip = self.args
         try:
             geo = adjust.apply_geometry(src, params, crop=not crop_mode)
             out = adjust.apply(geo, params)
             before = qimage_from_array(geo) if need_before else None
-            self.done.emit(gen, key, before, qimage_from_array(out), round(geo.shape[1] * full_side / max(src.shape[:2])))
+            self.done.emit(gen, key, before, qimage_from_array(out), round(geo.shape[1] * full_side / max(src.shape[:2])), clip_overlay(out) if show_clip else None)
         except Exception:
             log.exception("Ошибка чёткой перерисовки")
 
@@ -225,6 +241,7 @@ class MainWindow(QMainWindow):
         self.store = FilterStore()
         self.active_filter = None
         self.sliders: dict[str, tuple[QSlider, QLabel, int, str, int]] = {}
+        self._sec_keys: dict = {}  # раздел -> какие параметры он содержит (для сброса и пометки «изменён»)
         self.history: list[dict] = []  # снимки параметров для отмены/повтора
         self.hidx = -1
         self._commit_timer = QTimer(self)
@@ -258,6 +275,8 @@ class MainWindow(QMainWindow):
         sb.setSizeGripEnabled(False)
 
         self.hist = HistogramWidget()
+        self.clip_on = False
+        self.hist.clip_toggled.connect(self._toggle_clip)
         tabs = QTabWidget()
         tabs.addTab(self._auto_tab(), "Авто · ИИ")
         tabs.addTab(self._manual_tab(), "Ручные")
@@ -311,7 +330,7 @@ class MainWindow(QMainWindow):
 
     def _shortcuts(self):
         for keys, fn in (("Ctrl+Shift+C", self._copy_settings), ("Ctrl+Shift+V", self._paste_settings), ("F1", self.show_help),
-                         ("Ctrl+0", self.canvas.fit), ("Ctrl+1", self.canvas.zoom_100),
+                         ("Ctrl+0", self.canvas.fit), ("Ctrl+1", self.canvas.zoom_100), ("J", lambda: self.hist.clip_btn.toggle()),
                          ("Alt+Left", lambda: self._step(-1)), ("Alt+Right", lambda: self._step(1))):
             QShortcut(QKeySequence(keys), self, fn)
         self._crop_keys = [QShortcut(QKeySequence(k), self, self._crop_enter) for k in ("Return", "Enter")]
@@ -367,6 +386,14 @@ class MainWindow(QMainWindow):
                   _button(" Экспорт…", self.save_dialog, True, "Ctrl+S", "Сохранить результат в файл (Ctrl+S)", "export")):
             bar.addWidget(w)
         return bar
+
+    def _toggle_clip(self, on: bool):
+        """Индикатор пересветов (красный) и провалов (синий) на фото."""
+        self.clip_on = on
+        if self.preview is not None:
+            self.render()
+        else:
+            self.canvas.set_overlay(None)
 
     def _focus_mode(self, on: bool):
         """Только фото: панель настроек и лента скрываются (повторное нажатие возвращает)."""
@@ -451,18 +478,19 @@ class MainWindow(QMainWindow):
             remove_custom(mid)
             self._model_list("iat_exposure")
 
-    def _section(self, title: str, rows, expanded: bool = True) -> Section:
-        sec = Section(title, expanded)
+    def _section(self, title: str, rows, expanded: bool = True, keys: list | None = None) -> Section:
+        keys = keys if keys is not None else [r[0] for r in rows]
+        sec = Section(title, expanded, lambda: self._reset_keys(keys))
+        self._sec_keys[sec] = keys
         for key, label, lo, hi, div, fmt, mul in rows:
             cap = _label(label)
             cap.setFixedWidth(104)
             s = UniSlider(lo, hi) if key in UNIPOLAR else BipolarSlider(lo, hi)
             s.valueChanged.connect(self._on_slider)
-            val = _label(muted=True)
+            val = ValueEdit()
+            val.committed.connect(lambda t, key=key: self._value_typed(key, t))
             for w_ in (cap, s, val):
                 w_.setToolTip(TIPS.get(key, ""))
-            val.setFixedWidth(50)
-            val.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self.sliders[key] = (s, val, div, fmt, mul)
             row = QHBoxLayout()
             row.setSpacing(6)
@@ -487,12 +515,13 @@ class MainWindow(QMainWindow):
         crow = QHBoxLayout()
         crow.addWidget(ch)
         crow.addWidget(pre)
-        cs = Section("Тоновая кривая", False)
+        cs = Section("Тоновая кривая", False, lambda: self._reset_keys(["curves"]))
+        self._sec_keys[cs] = ["curves"]
         cs.add(crow)
         cs.body_lay.addWidget(self.curve, 0, Qt.AlignHCenter)
 
         hs = self._hsl_section()
-        geo = self._section("Кадр и поворот", STRAIGHTEN, False)
+        geo = self._section("Кадр и поворот", STRAIGHTEN, False, keys=["straighten", "geometry"])
         grow = QHBoxLayout()
         for name, tip, fn in (("rotate_left", "Повернуть влево на 90°", lambda: self._geo(rotate90=(self.params.rotate90 - 1) % 4)),
                               ("rotate_right", "Повернуть вправо на 90°", lambda: self._geo(rotate90=(self.params.rotate90 + 1) % 4)),
@@ -541,7 +570,8 @@ class MainWindow(QMainWindow):
 
     def _hsl_section(self) -> Section:
         """Цвет по оттенкам: образцы цветов в ряд и три ползунка для выбранного (как в Lightroom «Микс цветов»)."""
-        sec = Section("Цвет по оттенкам (HSL)", False)
+        sec = Section("Цвет по оттенкам (HSL)", False, lambda: self._reset_keys(["hsl"]))
+        self._sec_keys[sec] = ["hsl"]
         self.hsl_color = "orange"
         self.hsl_buttons: dict[str, QPushButton] = {}
         row = QHBoxLayout()
@@ -566,9 +596,8 @@ class MainWindow(QMainWindow):
             cap.setFixedWidth(104)
             s = BipolarSlider(-100, 100)
             s.valueChanged.connect(lambda _v, i=i: self._on_hsl(i))
-            val = _label(muted=True)
-            val.setFixedWidth(50)
-            val.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            val = ValueEdit()
+            val.committed.connect(lambda t, i=i: self._hsl_typed(i, t))
             r = QHBoxLayout()
             r.setSpacing(6)
             r.addWidget(cap)
@@ -929,6 +958,66 @@ class MainWindow(QMainWindow):
             val.setText(fmt.format(getattr(self.params, key) * mul))
         self.curve.set_curves(self.params.curves)
         self._hsl_sync()
+        self._mark_sections()
+
+    @staticmethod
+    def _parse_number(text: str) -> float | None:
+        """Число из строки, которую ввёл пользователь: «+0,5», «12 %», «-3.2°»."""
+        m = re.search(r"[-+−]?\s*(?:\d+[.,]?\d*|[.,]\d+)", text)  # первое число; «−» — типографский минус
+        if not m:
+            return None
+        return float(m.group().replace(" ", "").replace(",", ".").replace("−", "-"))
+
+    def _value_typed(self, key: str, text: str):
+        s, val, div, fmt, mul = self.sliders[key]
+        v = self._parse_number(text)
+        if v is not None:
+            s.setValue(round(v / mul * div))  # QSlider сам ограничивает значение диапазоном ползунка
+        self._sync_ui()  # вернуть корректный текст (и после неверного ввода)
+
+    def _hsl_typed(self, i: int, text: str):
+        v = self._parse_number(text)
+        if v is not None:
+            self.hsl_sliders[i][0].setValue(round(v))
+        self._hsl_sync()
+
+    def _is_modified(self, keys: list) -> bool:
+        d, p = EditParams(), self.params
+        for k in keys:
+            if k == "curves":
+                changed = not p.curve_is_identity()
+            elif k == "hsl":
+                changed = not p.hsl_is_identity()
+            elif k == "geometry":
+                changed = bool(p.rotate90 % 4 or p.flip_h or p.flip_v or p.crop != d.crop)
+            else:
+                changed = getattr(p, k) != getattr(d, k)
+            if changed:
+                return True
+        return False
+
+    def _mark_sections(self):
+        for sec, keys in self._sec_keys.items():
+            sec.set_modified(self._is_modified(keys))
+
+    def _reset_keys(self, keys: list):
+        """Вернуть параметры раздела к исходным (кнопка у заголовка раздела); действие можно отменить."""
+        if "geometry" in keys and self.crop_mode:
+            self.canvas.crop = [0.0, 0.0, 1.0, 1.0]
+            self.crop_btn.setChecked(False)
+        d = EditParams()
+        for k in keys:
+            if k == "curves":
+                self.params.curves = d.curves
+            elif k == "hsl":
+                self.params.hsl = d.hsl
+            elif k == "geometry":
+                for g in ("rotate90", "flip_h", "flip_v", "crop"):
+                    setattr(self.params, g, getattr(d, g))
+            else:
+                setattr(self.params, k, getattr(d, k))
+        self._sync_ui()
+        self._edited()
 
     def _on_slider(self):
         for key, (s, val, div, fmt, mul) in self.sliders.items():
@@ -941,6 +1030,7 @@ class MainWindow(QMainWindow):
         self._edited()
 
     def _edited(self):
+        self._mark_sections()
         self._schedule_render()
         self._commit_timer.start()  # снимок для отмены берём, когда пользователь остановился
 
@@ -1176,6 +1266,7 @@ class MainWindow(QMainWindow):
             self._before, self._before_key = self._qimage(geo), key
         self.canvas.source_width = round(geo.shape[1] * max(self.full_size) / max(src.shape[:2]))
         self.canvas.set_pair(self._before, self._qimage(out))
+        self.canvas.set_overlay(clip_overlay(out) if self.clip_on else None)
         self.hist.set_image(out)
         self._zoom_changed()
 
@@ -1188,16 +1279,17 @@ class MainWindow(QMainWindow):
             return
         p = self.params
         key = (id(self.preview), p.rotate90, p.flip_h, p.flip_v, p.straighten, tuple(p.crop), self.crop_mode)
-        self.hq_worker = HqWorker(self._hq_gen, key, self.preview, copy.deepcopy(p), self.crop_mode, key != self._before_key, max(self.full_size))
+        self.hq_worker = HqWorker(self._hq_gen, key, self.preview, copy.deepcopy(p), self.crop_mode, key != self._before_key, max(self.full_size), self.clip_on)
         self.hq_worker.done.connect(self._hq_done)
         self.hq_worker.start()
 
-    def _hq_done(self, gen: int, key, before, after, source_width: int):
+    def _hq_done(self, gen: int, key, before, after, source_width: int, overlay):
         if gen == self._hq_gen and self.preview is not None:  # иначе пользователь уже изменил настройки: результат устарел
             if before is not None:
                 self._before, self._before_key = before, key
             self.canvas.source_width = source_width
             self.canvas.set_pair(self._before, after)
+            self.canvas.set_overlay(overlay)
             self._zoom_changed()
         if self._hq_again:
             self._hq_again = False

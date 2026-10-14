@@ -570,3 +570,12 @@ def test_open_preview_draft_and_orientation(tmp_path, monkeypatch):
     assert open_preview(png, 200)[1] == (1600, 900)
     t = thumb_for(p)
     assert t is not None and max(Image.open(t).size) <= 192
+
+
+def test_parse_number_from_user_text():
+    """Разбор числа, которое пользователь ввёл рядом с ползунком: единицы, запятая, пробелы, знак, мусор."""
+    from app.gui.main_window import MainWindow
+
+    parse = MainWindow._parse_number
+    assert parse("0,75") == 0.75 and parse("+1.5 EV") == 1.5 and parse(" -3.2° ") == -3.2 and parse("12 %") == 12 and parse("−40") == -40
+    assert parse(".5") == 0.5 and parse("абв") is None and parse("") is None and parse("EV") is None

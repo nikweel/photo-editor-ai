@@ -35,6 +35,7 @@ Two buttons on the **Auto · AI** tab: **exposure + colour** or **exposure only*
 - **Tone curve like in Photoshop:** click anywhere on the curve to add a point and drag it; `Ctrl`+click or `Delete` removes it; arrow keys nudge; black/white points move; RGB / R / G / B channels, presets and a histogram behind the curve.
 - **HSL** for 8 colours (hue, saturation, luminance), **detail** (sharpness, texture, clarity, colour noise) and **effects** (dehaze, vignette, grain).
 - **Crop and rotate:** interactive crop with aspect ratios, 90° rotation, flips, horizon straightening.
+- **Handy controls:** click a number next to a slider to type the exact value; every section has a reset button and a dot that shows it has changes; hover a slider for a hint; `J` shows blown highlights (red) and crushed shadows (blue) on the photo.
 - **Before / After** slider you can drag, zoom with the mouse wheel, a live histogram, **undo / redo** (`Ctrl+Z`).
 - Smooth even with heavy filters: a fast draft while you drag, the full-quality render follows in the background.
 - **RAW** files (CR2, CR3, NEF, ARW, DNG, ORF, RAF, RW2, PEF and more) through rawpy / LibRaw.
@@ -63,7 +64,7 @@ A single filter uses `"format": "photo-editor-ai-filter"` with `name`, `category
 - **Batch processing:** apply AI auto-correction and/or the settings of the open photo to a whole folder, with format, size and EXIF options. A broken file never stops the batch.
 
 ## Keyboard
-`Ctrl+I` import · `Ctrl+U` AI auto-correction · `F` focus mode (hide panels) · `Ctrl+S` export · `Ctrl+Z` / `Ctrl+Shift+Z` undo / redo · `\` before/after · mouse wheel zoom · `Ctrl+0` / `Ctrl+1` fit / 100% · `Alt+←/→` previous/next photo · `0`–`5` rating · `Ctrl+Shift+C/V` copy/paste settings · `Enter` / `Esc` apply/cancel crop · `F1` help.
+`Ctrl+I` import · `Ctrl+U` AI auto-correction · `F` focus mode (hide panels) · `J` clipping warning · `Ctrl+S` export · `Ctrl+Z` / `Ctrl+Shift+Z` undo / redo · `\` before/after · mouse wheel zoom · `Ctrl+0` / `Ctrl+1` fit / 100% · `Alt+←/→` previous/next photo · `0`–`5` rating · `Ctrl+Shift+C/V` copy/paste settings · `Enter` / `Esc` apply/cancel crop · `F1` help.
 
 ## Download (no Python needed)
 Get the file for your system from the [**Releases**](https://github.com/nikweel/photo-editor-ai/releases/latest) page:

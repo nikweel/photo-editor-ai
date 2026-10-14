@@ -53,6 +53,9 @@ QComboBox:hover {{ border-color: #50505a; }}
 QComboBox QAbstractItemView {{ background: {SURFACE}; border: 1px solid {BORDER}; selection-background-color: {ACCENT}; outline: none; }}
 QLineEdit, QSpinBox {{ background: {BG}; border: 1px solid {BORDER}; border-radius: 6px; padding: 5px 8px; }}
 QLineEdit:focus, QSpinBox:focus {{ border-color: {ACCENT}; }}
+QLineEdit[value="true"] {{ background: transparent; border: 1px solid transparent; border-radius: 4px; padding: 1px 3px; color: {MUTED}; }}
+QLineEdit[value="true"]:hover {{ border-color: {BORDER}; color: {TEXT}; }}
+QLineEdit[value="true"]:focus {{ background: {BG}; border-color: {ACCENT}; color: {TEXT}; }}
 
 QListWidget {{ background: {BG}; border: 1px solid {BORDER}; border-radius: 8px; outline: none; padding: 3px; }}
 QListWidget::item {{ border-radius: 6px; padding: 5px 6px; }}
