@@ -7,7 +7,15 @@ permissions:
   contents: write
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-22.04, name: linux }
+          - { os: windows-latest, name: windows }
+          - { os: macos-14, name: macos-arm64 }
+          - { os: macos-15-intel, name: macos-intel }
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -20,13 +28,35 @@ jobs:
         run: uv run --python 3.12 pytest -q
       - name: Build bundle
         run: uv run --python 3.12 --with pyinstaller pyinstaller --noconfirm packaging.spec
-      - name: Self-test of the built app
+      - name: Self-test of the built app (Linux)
+        if: matrix.name == 'linux'
         run: QT_QPA_PLATFORM=offscreen dist/Photo-Editor-AI/Photo-Editor-AI --selftest
+      - name: Self-test of the built app (Windows)
+        if: matrix.name == 'windows'
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "dist\Photo-Editor-AI\Photo-Editor-AI.exe" -ArgumentList "--selftest" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "self-test failed: exit code $($p.ExitCode)" }
+      - name: Self-test of the built app (macOS)
+        if: startsWith(matrix.name, 'macos')
+        run: QT_QPA_PLATFORM=offscreen dist/Photo-Editor-AI.app/Contents/MacOS/Photo-Editor-AI --selftest
       - name: Linux packages (.deb and AppImage)
+        if: matrix.name == 'linux'
         run: sh packaging/linux.sh "$APP_VERSION"
+      - name: Windows installer
+        if: matrix.name == 'windows'
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging\windows.iss
+      - name: macOS dmg
+        if: startsWith(matrix.name, 'macos')
+        run: |
+          mkdir -p release
+          hdiutil create -volname "Photo Editor AI" -srcfolder dist/Photo-Editor-AI.app -ov -format UDZO "release/Photo-Editor-AI-$APP_VERSION-${{ matrix.name }}.dmg"
       - uses: actions/upload-artifact@v4
         with:
-          name: linux
+          name: ${{ matrix.name }}
           path: release/*
       - name: Publish release
         if: github.ref_type == 'tag'

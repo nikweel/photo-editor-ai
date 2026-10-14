@@ -1,4 +1,6 @@
 # PyInstaller: pyinstaller --noconfirm packaging.spec
+import sys
+
 from PyInstaller.utils.hooks import collect_all
 
 raw_datas, raw_binaries, raw_hidden = collect_all("rawpy")
@@ -13,5 +15,8 @@ a = Analysis(
               "torch", "matplotlib", "scipy", "pandas", "onnx", "pytest"],
 )
 pyz = PYZ(a.pure)
-exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="Photo-Editor-AI", console=False)
+exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="Photo-Editor-AI", console=False,
+          icon="assets/icon.ico" if sys.platform == "win32" else None)
 coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="Photo-Editor-AI")
+if sys.platform == "darwin":
+    app = BUNDLE(coll, name="Photo-Editor-AI.app", icon="assets/icon.icns", bundle_identifier="io.github.nikweel.photoeditorai")
