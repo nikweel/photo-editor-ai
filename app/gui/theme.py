@@ -37,6 +37,9 @@ QPushButton:disabled {{ color: #66666e; background: #232326; border-color: #2c2c
 QPushButton[primary="true"] {{ background: {ACCENT}; border-color: {ACCENT}; color: white; font-weight: 600; }}
 QPushButton[primary="true"]:hover {{ background: {ACCENT_HI}; border-color: {ACCENT_HI}; }}
 QPushButton[primary="true"]:disabled {{ background: #2f3f5e; border-color: #2f3f5e; color: #8c97ad; }}
+QPushButton[accent="true"] {{ background: transparent; border: 1px solid {ACCENT}; color: {ACCENT_HI}; font-weight: 600; }}
+QPushButton[accent="true"]:hover {{ background: rgba(76, 141, 255, 0.16); }}
+QPushButton[accent="true"]:disabled {{ border-color: #2f3f5e; color: #5a6a88; }}
 QPushButton[flat="true"] {{ background: transparent; border-color: transparent; }}
 QPushButton[flat="true"]:hover {{ background: {SURFACE}; }}
 

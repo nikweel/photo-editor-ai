@@ -63,7 +63,7 @@ A single filter uses `"format": "photo-editor-ai-filter"` with `name`, `category
 - **Batch processing:** apply AI auto-correction and/or the settings of the open photo to a whole folder, with format, size and EXIF options. A broken file never stops the batch.
 
 ## Keyboard
-`Ctrl+I` import · `Ctrl+S` export · `Ctrl+Z` / `Ctrl+Shift+Z` undo / redo · `\` before/after · mouse wheel zoom · `Ctrl+0` / `Ctrl+1` fit / 100% · `Alt+←/→` previous/next photo · `0`–`5` rating · `Ctrl+Shift+C/V` copy/paste settings · `Enter` / `Esc` apply/cancel crop · `F1` help.
+`Ctrl+I` import · `Ctrl+U` AI auto-correction · `F` focus mode (hide panels) · `Ctrl+S` export · `Ctrl+Z` / `Ctrl+Shift+Z` undo / redo · `\` before/after · mouse wheel zoom · `Ctrl+0` / `Ctrl+1` fit / 100% · `Alt+←/→` previous/next photo · `0`–`5` rating · `Ctrl+Shift+C/V` copy/paste settings · `Enter` / `Esc` apply/cancel crop · `F1` help.
 
 ## Download (no Python needed)
 Get the file for your system from the [**Releases**](https://github.com/nikweel/photo-editor-ai/releases/latest) page:

@@ -16,6 +16,7 @@ class CompareCanvas(QWidget):
     """Показ фото: зум колесом, перемещение мышью, сравнение «до/после» с линией и режим кадрирования."""
     crop_changed = Signal(list)
     view_changed = Signal()
+    import_requested = Signal()  # клик по приветственному экрану: открыть импорт
 
     def __init__(self):
         super().__init__()
@@ -118,8 +119,7 @@ class CompareCanvas(QWidget):
         p = QPainter(self)
         p.fillRect(self.rect(), QColor(CANVAS))
         if self.after is None:
-            p.setPen(QColor(MUTED))
-            p.drawText(self.rect(), Qt.AlignCenter, self.message)
+            self._paint_empty(p)
             return
         p.setRenderHint(QPainter.SmoothPixmapTransform)
         r = self._rect()
@@ -128,6 +128,30 @@ class CompareCanvas(QWidget):
             self._paint_crop(p, r)
         elif self.compare:
             self._paint_compare(p, r)
+
+    def _paint_empty(self, p: QPainter):
+        """Приветственный экран: пунктирная область, значок, заголовок и подсказка. Клик по ней открывает импорт."""
+        from .icons import icon
+
+        area = QRectF(self.rect()).adjusted(28, 28, -28, -28)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(QPen(QColor("#34343a"), 1.5, Qt.DashLine))
+        p.setBrush(Qt.NoBrush)
+        p.drawRoundedRect(area, 16, 16)
+        c = area.center()
+        ic = icon("import", 56, color="#5b5b66").pixmap(56, 56)
+        p.drawPixmap(int(c.x() - 28), int(c.y() - 86), ic)
+        f = p.font()
+        f.setPointSize(f.pointSize() + 5)
+        f.setBold(True)
+        p.setFont(f)
+        p.setPen(QColor("#d8d8de"))
+        p.drawText(QRectF(area.left(), c.y() - 18, area.width(), 34), Qt.AlignCenter, "Добавьте фото")
+        f.setPointSize(f.pointSize() - 5)
+        f.setBold(False)
+        p.setFont(f)
+        p.setPen(QColor(MUTED))
+        p.drawText(QRectF(area.left() + 20, c.y() + 22, area.width() - 40, 90), Qt.AlignHCenter | Qt.AlignTop | Qt.TextWordWrap, self.message)
 
     def _paint_compare(self, p: QPainter, r: QRectF):
         x = r.left() + r.width() * self.split
@@ -269,7 +293,11 @@ class CompareCanvas(QWidget):
 
     # ---------- мышь ----------
     def mousePressEvent(self, e):
-        if self.after is None or e.button() != Qt.LeftButton:
+        if self.after is None:
+            if e.button() == Qt.LeftButton:
+                self.import_requested.emit()
+            return
+        if e.button() != Qt.LeftButton:
             return
         pos = e.position()
         self._last = pos
@@ -289,6 +317,9 @@ class CompareCanvas(QWidget):
             self.update()
 
     def mouseMoveEvent(self, e):
+        if self.after is None:
+            self.setCursor(Qt.PointingHandCursor)
+            return
         pos = e.position()
         r = self._rect() if self.after is not None else QRectF()
         if self._drag == "split":

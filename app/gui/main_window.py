@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QByteArray, Qt, QThread, QTimer, QUrl, Signal
+from PySide6.QtCore import QByteArray, QSize, Qt, QThread, QTimer, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QImage, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QComboBox, QFileDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox,
                                QPushButton, QSlider, QTabWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
@@ -25,6 +25,7 @@ from .curve_widget import PRESETS, CurveWidget
 from .export_dialog import ExportDialog
 from .filter_dialogs import SaveFilterDialog
 from .filmstrip import Filmstrip
+from .icons import icon
 from .import_dialog import ImportDialog
 from .widgets import BipolarSlider, HistogramWidget, Section, UniSlider
 
@@ -53,8 +54,31 @@ HSL_SWATCH = {"red": "#e0443e", "orange": "#ee8b2f", "yellow": "#e8cf3c", "green
               "purple": "#8a56d6", "magenta": "#d556b5"}
 ASPECTS = [("Свободно", None), ("Исходные", "orig"), ("1 : 1", 1.0), ("4 : 3", 4 / 3), ("3 : 4", 3 / 4), ("3 : 2", 3 / 2), ("2 : 3", 2 / 3),
            ("16 : 9", 16 / 9), ("9 : 16", 9 / 16), ("5 : 4", 5 / 4), ("4 : 5", 4 / 5)]
+EMPTY_HINT = "Перетащите фото или папку в окно\nили нажмите здесь, чтобы выбрать файлы  (Ctrl+I)"
+TIPS = {
+    "exposure": "Общая яркость кадра в ступенях (EV): +1 — вдвое светлее, −1 — вдвое темнее",
+    "contrast": "Разница между светлым и тёмным: вправо — резче и плотнее, влево — мягче",
+    "highlights": "Самые светлые области: влево — вернуть детали пересвета, вправо — осветлить",
+    "shadows": "Тёмные области: вправо — проявить детали в тенях, влево — сгустить",
+    "whites": "Белая точка: влево — приглушить самые яркие света, вправо — добавить блеска",
+    "blacks": "Чёрная точка: влево — углубить чёрный, вправо — «поднять» тени (матовость)",
+    "temperature": "Баланс белого: вправо — теплее (жёлтый), влево — холоднее (синий)",
+    "tint": "Зелёно-пурпурный сдвиг баланса белого: вправо — к пурпурному, влево — к зелёному",
+    "vibrance": "Усиливает бледные цвета и почти не трогает уже насыщенные: кожа остаётся естественной",
+    "saturation": "Насыщенность всех цветов сразу: влево до −100 — чёрно-белое",
+    "sharpen": "Резкость мелких деталей",
+    "texture": "Контраст мелких деталей и фактуры (кожа, ткань, кора)",
+    "clarity": "Контраст средних тонов: добавляет «объём»; влево — смягчает",
+    "noise_color": "Убирает цветные пятна шума, не размывая детали по яркости",
+    "dehaze": "Вправо убирает дымку и туман, влево — добавляет",
+    "vignette": "Края кадра: влево — затемнить, вправо — осветлить",
+    "grain": "Плёночное зерно",
+    "straighten": "Выравнивание горизонта, ±45°",
+}
 HELP = """<table cellspacing=6>
 <tr><td><b>Ctrl+I</b></td><td>Импорт фото</td></tr>
+<tr><td><b>Ctrl+U</b></td><td>ИИ-автокоррекция (экспозиция и цвет)</td></tr>
+<tr><td><b>F</b></td><td>Режим «фокус»: скрыть панели и ленту</td></tr>
 <tr><td><b>Ctrl+S</b></td><td>Экспорт</td></tr>
 <tr><td><b>Ctrl+Z / Ctrl+Shift+Z</b></td><td>Отменить / повторить</td></tr>
 <tr><td><b>\\</b></td><td>Сравнение «До / После»</td></tr>
@@ -81,8 +105,11 @@ def _label(text: str = "", muted: bool = False, heading: bool = False, wrap: boo
     return l
 
 
-def _button(text: str, fn, primary: bool = False, shortcut: str | None = None, tip: str | None = None) -> QPushButton:
+def _button(text: str, fn, primary: bool = False, shortcut: str | None = None, tip: str | None = None, icon_name: str | None = None) -> QPushButton:
     b = QPushButton(text)
+    if icon_name:
+        b.setIcon(icon(icon_name))
+        b.setIconSize(QSize(18, 18))
     if primary:
         b.setProperty("primary", True)
     if shortcut:
@@ -210,7 +237,8 @@ class MainWindow(QMainWindow):
         self._hq_timer.timeout.connect(self._start_hq)
 
         self.canvas = CompareCanvas()
-        self.canvas.set_message("Перетащите фото сюда или нажмите «Импорт» (Ctrl+I)")
+        self.canvas.set_message(EMPTY_HINT)
+        self.canvas.import_requested.connect(self.import_dialog)
         self.canvas.crop_changed.connect(lambda _: self._update_crop_status())
         self.canvas.view_changed.connect(self._zoom_changed)
         self.status = _label("Готово", muted=True)
@@ -234,7 +262,7 @@ class MainWindow(QMainWindow):
         tabs.addTab(self._auto_tab(), "Авто · ИИ")
         tabs.addTab(self._manual_tab(), "Ручные")
         tabs.addTab(self._filters_tab(), "Фильтры")
-        panel = QWidget()
+        panel = self.panel = QWidget()
         pl = QVBoxLayout(panel)
         pl.setContentsMargins(0, 0, 0, 0)
         pl.setSpacing(8)
@@ -301,26 +329,49 @@ class MainWindow(QMainWindow):
 
     # ---------- верхняя панель ----------
     def _toolbar(self) -> QHBoxLayout:
-        self.undo_btn = _button("↶", self.undo, shortcut="Ctrl+Z", tip="Отменить (Ctrl+Z)")
-        self.redo_btn = _button("↷", self.redo, shortcut="Ctrl+Shift+Z", tip="Повторить (Ctrl+Shift+Z)")
+        self.undo_btn = _button("", self.undo, shortcut="Ctrl+Z", tip="Отменить (Ctrl+Z)", icon_name="undo")
+        self.redo_btn = _button("", self.redo, shortcut="Ctrl+Shift+Z", tip="Повторить (Ctrl+Shift+Z)", icon_name="redo")
         for b in (self.undo_btn, self.redo_btn):
             b.setProperty("flat", True)
-            b.setFixedWidth(40)
-        self.cmp_btn = QPushButton("До / После")
+            b.setFixedWidth(38)
+        self.cmp_btn = QPushButton(" До / После")
+        self.cmp_btn.setIcon(icon("compare"))
+        self.cmp_btn.setIconSize(QSize(18, 18))
         self.cmp_btn.setCheckable(True)
         self.cmp_btn.setShortcut("\\")
         self.cmp_btn.setToolTip("Сравнить с оригиналом; линию можно двигать мышью (клавиша \\)")
         self.cmp_btn.setCursor(Qt.PointingHandCursor)
         self.cmp_btn.toggled.connect(self.canvas.set_compare)
+        self.focus_btn = QPushButton()
+        self.focus_btn.setIcon(icon("focus"))
+        self.focus_btn.setIconSize(QSize(18, 18))
+        self.focus_btn.setCheckable(True)
+        self.focus_btn.setShortcut("F")
+        self.focus_btn.setFixedWidth(38)
+        self.focus_btn.setToolTip("Фокус на фото: скрыть панели и ленту (F)")
+        self.focus_btn.setCursor(Qt.PointingHandCursor)
+        self.focus_btn.toggled.connect(self._focus_mode)
+        self.quick_auto = _button(" Авто", lambda: self.auto_correct("full"), shortcut="Ctrl+U",
+                                  tip="ИИ-автокоррекция: экспозиция и цвет одним нажатием (Ctrl+U). Выбор модели и режимов — на вкладке «Авто · ИИ»", icon_name="auto")
+        self.quick_auto.setProperty("accent", True)
         bar = QHBoxLayout()
         bar.setSpacing(8)
-        for w in (_button("Импорт", self.import_dialog, True, "Ctrl+I", "Добавить фото в каталог (Ctrl+I)"), self.undo_btn, self.redo_btn, self.cmp_btn):
+        bar.addWidget(_button(" Импорт", self.import_dialog, True, "Ctrl+I", "Добавить фото в каталог (Ctrl+I)", "import"))
+        bar.addWidget(self.quick_auto)
+        bar.addSpacing(10)
+        for w in (self.undo_btn, self.redo_btn, self.cmp_btn, self.focus_btn):
             bar.addWidget(w)
         bar.addStretch()
-        for w in (_button("Пакетная обработка", self.batch_dialog), _button("Сбросить всё", self.reset),
-                  _button("Экспорт…", self.save_dialog, True, "Ctrl+S", "Сохранить результат в файл (Ctrl+S)")):
+        for w in (_button(" Пакетная обработка", self.batch_dialog, icon_name="batch", tip="Применить ИИ и настройки ко многим фото сразу"),
+                  _button(" Сбросить", self.reset, icon_name="reset", tip="Вернуть все настройки текущего фото к исходным (можно отменить: Ctrl+Z)"),
+                  _button(" Экспорт…", self.save_dialog, True, "Ctrl+S", "Сохранить результат в файл (Ctrl+S)", "export")):
             bar.addWidget(w)
         return bar
+
+    def _focus_mode(self, on: bool):
+        """Только фото: панель настроек и лента скрываются (повторное нажатие возвращает)."""
+        self.panel.setVisible(not on)
+        self.strip.setVisible(not on)
 
     def batch_dialog(self):
         BatchDialog(self, self.model_box.currentData(), copy.deepcopy(self.params) if self.src_path else None).exec()
@@ -408,6 +459,8 @@ class MainWindow(QMainWindow):
             s = UniSlider(lo, hi) if key in UNIPOLAR else BipolarSlider(lo, hi)
             s.valueChanged.connect(self._on_slider)
             val = _label(muted=True)
+            for w_ in (cap, s, val):
+                w_.setToolTip(TIPS.get(key, ""))
             val.setFixedWidth(50)
             val.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self.sliders[key] = (s, val, div, fmt, mul)
@@ -441,17 +494,19 @@ class MainWindow(QMainWindow):
         hs = self._hsl_section()
         geo = self._section("Кадр и поворот", STRAIGHTEN, False)
         grow = QHBoxLayout()
-        for text, tip, fn in (("↺", "Повернуть влево на 90°", lambda: self._geo(rotate90=(self.params.rotate90 - 1) % 4)),
-                              ("↻", "Повернуть вправо на 90°", lambda: self._geo(rotate90=(self.params.rotate90 + 1) % 4)),
-                              ("⇆", "Отразить по горизонтали", lambda: self._geo(flip_h=1 - self.params.flip_h)),
-                              ("⇅", "Отразить по вертикали", lambda: self._geo(flip_v=1 - self.params.flip_v))):
-            grow.addWidget(_button(text, fn, tip=tip))
+        for name, tip, fn in (("rotate_left", "Повернуть влево на 90°", lambda: self._geo(rotate90=(self.params.rotate90 - 1) % 4)),
+                              ("rotate_right", "Повернуть вправо на 90°", lambda: self._geo(rotate90=(self.params.rotate90 + 1) % 4)),
+                              ("flip_h", "Отразить по горизонтали", lambda: self._geo(flip_h=1 - self.params.flip_h)),
+                              ("flip_v", "Отразить по вертикали", lambda: self._geo(flip_v=1 - self.params.flip_v))):
+            grow.addWidget(_button("", fn, tip=tip, icon_name=name))
         geo.body_lay.insertLayout(0, grow)
         self.aspect = QComboBox()
         for name, _v in ASPECTS:
             self.aspect.addItem(name)
         self.aspect.currentIndexChanged.connect(self._aspect_changed)
-        self.crop_btn = QPushButton("Кадрировать")
+        self.crop_btn = QPushButton(" Кадрировать")
+        self.crop_btn.setIcon(icon("crop"))
+        self.crop_btn.setIconSize(QSize(18, 18))
         self.crop_btn.setCheckable(True)
         self.crop_btn.setCursor(Qt.PointingHandCursor)
         self.crop_btn.toggled.connect(self._toggle_crop)
@@ -992,7 +1047,7 @@ class MainWindow(QMainWindow):
         self.preview = self.preview_small = self.preview_tiny = self.full_size = None
         self._shown = None
         self.canvas.after = self.canvas.before = None
-        self.canvas.set_message("Перетащите фото сюда или нажмите «Импорт» (Ctrl+I)")
+        self.canvas.set_message(EMPTY_HINT)
         self.hist.set_image(None)
         self.info.setText("")
         self.zoom_lbl.setText("")
@@ -1176,7 +1231,7 @@ class MainWindow(QMainWindow):
             self.dl_worker.failed.connect(lambda m: self.status.setText(f"Модель не скачана: {m}"))
             self.dl_worker.start()
             return
-        for b in (self.auto_exp_btn, self.auto_full_btn):
+        for b in (self.auto_exp_btn, self.auto_full_btn, self.quick_auto):
             b.setEnabled(False)
         self.status.setText("ИИ анализирует кадр…")
         self.worker = AutoWorker(self.preview, self.model_box.currentData(), mode)
@@ -1185,13 +1240,13 @@ class MainWindow(QMainWindow):
         self.worker.start()
 
     def _auto_failed(self, msg: str):
-        self.auto_exp_btn.setEnabled(True)
-        self.auto_full_btn.setEnabled(True)
+        for b in (self.auto_exp_btn, self.auto_full_btn, self.quick_auto):
+            b.setEnabled(True)
         self.status.setText(f"Ошибка: {msg}")
 
     def _auto_done(self, sug: dict):
-        self.auto_exp_btn.setEnabled(True)
-        self.auto_full_btn.setEnabled(True)
+        for b in (self.auto_exp_btn, self.auto_full_btn, self.quick_auto):
+            b.setEnabled(True)
         k = self.auto_strength.value() / 100
         for key in ("exposure", "temperature", "tint", "vibrance"):
             if key in sug:
