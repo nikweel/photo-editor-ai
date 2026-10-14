@@ -1,11 +1,11 @@
 # Photo Editor AI
 
-[English](README.md) · **Русский**
+[العربية](README.ar.md) · [Български](README.bg.md) · [中文（简体）](README.zh.md) · [繁體中文](README.zh-TW.md) · [Hrvatski](README.hr.md) · [Čeština](README.cs.md) · [Dansk](README.da.md) · [Nederlands](README.nl.md) · [English](README.md) · [Suomi](README.fi.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Ελληνικά](README.el.md) · [हिन्दी](README.hi.md) · [Magyar](README.hu.md) · [Bahasa Indonesia](README.id.md) · [Italiano](README.it.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Lietuvių](README.lt.md) · [Norsk](README.nb.md) · [Polski](README.pl.md) · [Português](README.pt.md) · [Română](README.ro.md) · **Русский** · [Slovenčina](README.sk.md) · [Español](README.es.md) · [Svenska](README.sv.md) · [Türkçe](README.tr.md) · [Українська](README.uk.md)
 
 **Photo Editor AI** — бесплатный фоторедактор с открытым кодом: **ИИ-автокоррекция**, тоновая кривая как в Photoshop, HSL, **пакеты фильтров** с импортом и экспортом, каталог как в Lightroom и пакетная обработка.
 Редактирование **неразрушающее**: оригиналы никогда не меняются, правки хранятся как настройки и применяются при экспорте.
 
-> 🖥️ **Сначала Ubuntu.** Написан на Python, PySide6 (Qt) и ONNX Runtime, поэтому сборки для Windows и macOS запланированы. Всё работает **локально**: без облака и аккаунтов.
+> 🖥️ **Сначала Ubuntu.** Написан на Python, PySide6 (Qt) и ONNX Runtime, поэтому он работает и на **Windows и macOS**. Всё работает **локально**: без облака и аккаунтов.
 
 ## Скриншоты
 *(демонстрация на сгенерированном пейзаже)*
@@ -66,11 +66,19 @@
 `Ctrl+I` импорт · `Ctrl+S` экспорт · `Ctrl+Z` / `Ctrl+Shift+Z` отмена / повтор · `\` до/после · колесо мыши — масштаб · `Ctrl+0` / `Ctrl+1` вписать / 100% · `Alt+←/→` предыдущее/следующее фото · `0`–`5` рейтинг · `Ctrl+Shift+C/V` копировать/вставить настройки · `Enter` / `Esc` применить/отменить кадр · `F1` справка.
 
 ## Скачать (Python не нужен)
-Файл для Ubuntu и систем на базе Debian — на странице [**Releases**](https://github.com/nikweel/photo-editor-ai/releases/latest):
-- **`.deb`** — `sudo apt install ./Photo-Editor-AI-<версия>-amd64.deb`
-- **`.AppImage`** — `chmod +x Photo-Editor-AI-*.AppImage && ./Photo-Editor-AI-*.AppImage`
+Файл для вашей системы — на странице [**Releases**](https://github.com/nikweel/photo-editor-ai/releases/latest):
 
-Установленная программа хранит каталог, фильтры и модели в `~/.local/share/Photo-Editor-AI/`. Контрольные суммы лежат в `SHA256SUMS.txt`. Сборок для Windows и macOS пока нет.
+| Система | Файл |
+|---|---|
+| **Ubuntu / Debian** | `.deb` — `sudo apt install ./Photo-Editor-AI-<версия>-amd64.deb` · или `.AppImage` — `chmod +x Photo-Editor-AI-*.AppImage && ./Photo-Editor-AI-*.AppImage` |
+| **Windows 10/11** | `Photo-Editor-AI-<версия>-Setup.exe` |
+| **macOS** (Apple silicon) | `Photo-Editor-AI-<версия>-macos-arm64.dmg` |
+| **macOS** (Intel) | `Photo-Editor-AI-<версия>-macos-intel.dmg` |
+
+Контрольные суммы лежат в `SHA256SUMS.txt`. Каталог, фильтры и модели хранятся в папке данных пользователя (`~/.local/share/Photo-Editor-AI/` в Linux, `%LOCALAPPDATA%\Photo-Editor-AI\` в Windows, `~/Library/Application Support/Photo-Editor-AI/` в macOS).
+
+> ⚠️ **Сборки пока не подписаны**, поэтому Windows SmartScreen или macOS Gatekeeper могут предупредить о неизвестном издателе (macOS: правый клик по программе → *Открыть*). Все сборки собираются и проверяются автоматически (CI) на настоящих машинах Windows, macOS и Linux: тесты и запуск движка, Qt и ONNX Runtime. Но интерфейс больше всего проверен вручную на Ubuntu, о проблемах пишите в [Issues](https://github.com/nikweel/photo-editor-ai/issues).
+> В Windows ИИ использует видеокарту через DirectML, если она есть, и автоматически переходит на процессор, если нет.
 
 ## Запуск из исходников (Ubuntu)
 Нужен [uv](https://docs.astral.sh/uv/) (он сам установит Python).
@@ -93,7 +101,7 @@ QT_QPA_PLATFORM=offscreen uv run python scripts/make_screenshots.py   # пере
 Структура: `app/core` (движок изображения: кривые, HSL, микшер, детали, геометрия, LUT) · `app/ai` (модели и автокоррекция) · `app/services` (каталог, фильтры и пакеты, пакетная обработка, экспорт) · `app/gui` (интерфейс Qt) · `scripts` (экспорт моделей, скриншоты, подгонка фильтров).
 
 ## Планы
-Сборки для Windows и macOS, локальные правки (маски и кисти), панель микшера каналов, больше ИИ-моделей, больше языков интерфейса.
+Подпись сборок, локальные правки (маски и кисти), панель микшера каналов, больше ИИ-моделей, больше языков интерфейса.
 
 ## Лицензия
 [MIT](LICENSE). Сторонние компоненты и веса модели IAT: см. [NOTICE](NOTICE).

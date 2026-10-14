@@ -1,11 +1,11 @@
 # Photo Editor AI
 
-**English** · [Русский](README.ru.md)
+[العربية](README.ar.md) · [Български](README.bg.md) · [中文（简体）](README.zh.md) · [繁體中文](README.zh-TW.md) · [Hrvatski](README.hr.md) · [Čeština](README.cs.md) · [Dansk](README.da.md) · [Nederlands](README.nl.md) · **English** · [Suomi](README.fi.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Ελληνικά](README.el.md) · [हिन्दी](README.hi.md) · [Magyar](README.hu.md) · [Bahasa Indonesia](README.id.md) · [Italiano](README.it.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Lietuvių](README.lt.md) · [Norsk](README.nb.md) · [Polski](README.pl.md) · [Português](README.pt.md) · [Română](README.ro.md) · [Русский](README.ru.md) · [Slovenčina](README.sk.md) · [Español](README.es.md) · [Svenska](README.sv.md) · [Türkçe](README.tr.md) · [Українська](README.uk.md)
 
 **Photo Editor AI** is a free, open-source desktop photo editor with **AI auto-correction**, a Photoshop-style tone curve, HSL, filter **packs** you can import and export, a Lightroom-style library and batch processing.
 It edits **non-destructively**: your originals are never modified — all edits are stored as settings and applied on export.
 
-> 🖥️ **Ubuntu first.** Built with Python, PySide6 (Qt) and ONNX Runtime, so Windows and macOS builds are planned. Everything runs **locally**: no cloud, no account.
+> 🖥️ **Ubuntu first.** Built with Python, PySide6 (Qt) and ONNX Runtime, so it also runs on **Windows and macOS**. Everything runs **locally**: no cloud, no account.
 
 ## Screenshots
 *(demo with a generated landscape)*
@@ -66,11 +66,19 @@ A single filter uses `"format": "photo-editor-ai-filter"` with `name`, `category
 `Ctrl+I` import · `Ctrl+S` export · `Ctrl+Z` / `Ctrl+Shift+Z` undo / redo · `\` before/after · mouse wheel zoom · `Ctrl+0` / `Ctrl+1` fit / 100% · `Alt+←/→` previous/next photo · `0`–`5` rating · `Ctrl+Shift+C/V` copy/paste settings · `Enter` / `Esc` apply/cancel crop · `F1` help.
 
 ## Download (no Python needed)
-Get the file for Ubuntu / Debian-based systems from the [**Releases**](https://github.com/nikweel/photo-editor-ai/releases/latest) page:
-- **`.deb`** — `sudo apt install ./Photo-Editor-AI-<version>-amd64.deb`
-- **`.AppImage`** — `chmod +x Photo-Editor-AI-*.AppImage && ./Photo-Editor-AI-*.AppImage`
+Get the file for your system from the [**Releases**](https://github.com/nikweel/photo-editor-ai/releases/latest) page:
 
-The installed app keeps its catalog, filters and models in `~/.local/share/Photo-Editor-AI/`. Checksums are published as `SHA256SUMS.txt`. Windows and macOS builds are not available yet.
+| System | File |
+|---|---|
+| **Ubuntu / Debian** | `.deb` — `sudo apt install ./Photo-Editor-AI-<version>-amd64.deb` · or `.AppImage` — `chmod +x Photo-Editor-AI-*.AppImage && ./Photo-Editor-AI-*.AppImage` |
+| **Windows 10/11** | `Photo-Editor-AI-<version>-Setup.exe` |
+| **macOS** (Apple silicon) | `Photo-Editor-AI-<version>-macos-arm64.dmg` |
+| **macOS** (Intel) | `Photo-Editor-AI-<version>-macos-intel.dmg` |
+
+Checksums are published as `SHA256SUMS.txt`. The app keeps its catalog, filters and models in your user data folder (`~/.local/share/Photo-Editor-AI/` on Linux, `%LOCALAPPDATA%\Photo-Editor-AI\` on Windows, `~/Library/Application Support/Photo-Editor-AI/` on macOS).
+
+> ⚠️ **The builds are not code-signed yet**, so Windows SmartScreen or macOS Gatekeeper may warn about an unknown publisher (macOS: right-click the app → *Open*). All builds are produced and smoke-tested by CI on real Windows, macOS and Linux machines (tests, start-up of the engine, Qt and ONNX Runtime), but the interface has had the most hands-on testing on Ubuntu — please report problems in [Issues](https://github.com/nikweel/photo-editor-ai/issues).
+> On Windows the AI uses the GPU through DirectML when one is available and falls back to the CPU automatically.
 
 ## Run from source (Ubuntu)
 You need [uv](https://docs.astral.sh/uv/) (it installs Python for you).
@@ -93,7 +101,7 @@ QT_QPA_PLATFORM=offscreen uv run python scripts/make_screenshots.py   # regenera
 Layout: `app/core` (image engine: curves, HSL, mixer, details, geometry, LUT) · `app/ai` (models and auto-correction) · `app/services` (library, filters and packs, batch, export) · `app/gui` (Qt interface) · `scripts` (model export, screenshots, filter fitting).
 
 ## Roadmap
-Windows and macOS builds, local adjustments (masks and brushes), a channel-mixer panel, more AI models, more interface languages.
+Code signing, local adjustments (masks and brushes), a channel-mixer panel, more AI models, more interface languages.
 
 ## License
 [MIT](LICENSE). Third-party components and the IAT model weights: see [NOTICE](NOTICE).
