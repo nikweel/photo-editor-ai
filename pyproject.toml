@@ -1,6 +1,6 @@
 [project]
 name = "photo-editor-ai"
-version = "0.2.0"
+version = "0.3.0"
 description = "Free, open-source photo editor with AI auto-correction, tone curves, HSL, filter packs, batch processing and Lightroom-style library. Linux, Windows and macOS."
 readme = "README.md"
 license = { text = "MIT" }
