@@ -30,7 +30,11 @@ jobs:
         run: uv run --python 3.12 --with pyinstaller pyinstaller --noconfirm packaging.spec
       - name: Self-test of the built app (Linux)
         if: matrix.name == 'linux'
-        run: QT_QPA_PLATFORM=offscreen dist/Photo-Editor-AI/Photo-Editor-AI --selftest
+        run: |
+          # Qt needs these system libraries (the .deb declares them as dependencies); a bare CI runner lacks libEGL
+          sudo apt-get update -y
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3
+          QT_QPA_PLATFORM=offscreen dist/Photo-Editor-AI/Photo-Editor-AI --selftest
       - name: Self-test of the built app (Windows)
         if: matrix.name == 'windows'
         shell: pwsh

@@ -26,7 +26,7 @@ Section: graphics
 Priority: optional
 Architecture: amd64
 Maintainer: Nikolay Fedotov <nikweel@gmail.com>
-Depends: libgl1, libxkbcommon-x11-0, libxcb-cursor0
+Depends: libegl1, libgl1, libxkbcommon-x11-0, libxcb-cursor0, libfontconfig1, libdbus-1-3
 Homepage: https://github.com/nikweel/photo-editor-ai
 Description: Photo editor with AI auto-correction, filters and batch processing
  Non-destructive editing, tone curve, HSL, filter packs, Lightroom-style library.

@@ -77,7 +77,7 @@
 | **macOS** (Apple silicon) | `Photo-Editor-AI-<версия>-macos-arm64.dmg` |
 | **macOS** (Intel) | `Photo-Editor-AI-<версия>-macos-intel.dmg` |
 
-Контрольные суммы лежат в `SHA256SUMS.txt`. Каталог, фильтры и модели хранятся в папке данных пользователя (`~/.local/share/Photo-Editor-AI/` в Linux, `%LOCALAPPDATA%\Photo-Editor-AI\` в Windows, `~/Library/Application Support/Photo-Editor-AI/` в macOS).
+Контрольные суммы лежат в `SHA256SUMS.txt`. `.deb` сам ставит нужные Qt системные библиотеки; для `.AppImage` на минимальной системе поставьте их вручную: `sudo apt install libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0`. Каталог, фильтры и модели хранятся в папке данных пользователя (`~/.local/share/Photo-Editor-AI/` в Linux, `%LOCALAPPDATA%\Photo-Editor-AI\` в Windows, `~/Library/Application Support/Photo-Editor-AI/` в macOS).
 
 > ⚠️ **Сборки пока не подписаны**, поэтому Windows SmartScreen или macOS Gatekeeper могут предупредить о неизвестном издателе (macOS: правый клик по программе → *Открыть*). Все сборки собираются и проверяются автоматически (CI) на настоящих машинах Windows, macOS и Linux: тесты и запуск движка, Qt и ONNX Runtime. Но интерфейс больше всего проверен вручную на Ubuntu, о проблемах пишите в [Issues](https://github.com/nikweel/photo-editor-ai/issues).
 > В Windows ИИ использует видеокарту через DirectML, если она есть, и автоматически переходит на процессор, если нет.

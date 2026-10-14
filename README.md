@@ -77,7 +77,7 @@ Get the file for your system from the [**Releases**](https://github.com/nikweel/
 | **macOS** (Apple silicon) | `Photo-Editor-AI-<version>-macos-arm64.dmg` |
 | **macOS** (Intel) | `Photo-Editor-AI-<version>-macos-intel.dmg` |
 
-Checksums are published as `SHA256SUMS.txt`. The app keeps its catalog, filters and models in your user data folder (`~/.local/share/Photo-Editor-AI/` on Linux, `%LOCALAPPDATA%\Photo-Editor-AI\` on Windows, `~/Library/Application Support/Photo-Editor-AI/` on macOS).
+Checksums are published as `SHA256SUMS.txt`. The `.deb` pulls in the system libraries Qt needs; for the `.AppImage` on a minimal system install them yourself: `sudo apt install libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0`. The app keeps its catalog, filters and models in your user data folder (`~/.local/share/Photo-Editor-AI/` on Linux, `%LOCALAPPDATA%\Photo-Editor-AI\` on Windows, `~/Library/Application Support/Photo-Editor-AI/` on macOS).
 
 > ⚠️ **The builds are not code-signed yet**, so Windows SmartScreen or macOS Gatekeeper may warn about an unknown publisher (macOS: right-click the app → *Open*). All builds are produced and smoke-tested by CI on real Windows, macOS and Linux machines (tests, start-up of the engine, Qt and ONNX Runtime), but the interface has had the most hands-on testing on Ubuntu — please report problems in [Issues](https://github.com/nikweel/photo-editor-ai/issues).
 > On Windows the AI uses the GPU through DirectML when one is available and falls back to the CPU automatically.
