@@ -77,7 +77,7 @@ def inspect_onnx(path: Path) -> tuple[str, str]:
     import onnxruntime as ort
 
     try:
-        sess = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
+        sess = ort.InferenceSession(Path(path).read_bytes(), providers=["CPUExecutionProvider"])  # байты, а не путь: см. _session
     except Exception as e:
         raise ValueError(f"Файл не открывается как ONNX-модель: {e}") from None
     ins, outs = sess.get_inputs(), sess.get_outputs()
@@ -162,7 +162,9 @@ def _session(spec: ModelSpec, device: str):
     устройства, неподдерживаемая операция — не должна ломать ИИ: тихо переходим на процессор."""
     import onnxruntime as ort
 
-    path = str(MODELS_DIR / spec.file)
+    # Модель читаем сами и отдаём ONNX Runtime байты: на Windows он не открывает файл по пути с кириллицей и другими
+    # не-ANSI символами (например, у пользователя с русским именем профиля) — «No mapping for the Unicode character…».
+    path = (MODELS_DIR / spec.file).read_bytes()
     have = ort.get_available_providers()
     gpu = [p for p in ("CUDAExecutionProvider", "DmlExecutionProvider", "CoreMLExecutionProvider") if p in have]
     if device != "cpu" and gpu:

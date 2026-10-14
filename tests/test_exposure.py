@@ -503,3 +503,23 @@ def test_gpu_failure_falls_back_to_cpu(tmp_path, monkeypatch):
     e = R.Engine("gpu_test")
     e.session = BrokenRun(e.session)
     assert e.enhance(img).shape == img.shape and e._cpu  # после сбоя работает на процессоре
+
+
+def test_model_in_non_ascii_path(tmp_path, monkeypatch):
+    """Путь к модели с кириллицей (русское имя профиля на Windows): модель грузится из байтов, а не по пути."""
+    import numpy as np
+    import onnx
+    from onnx import TensorProto, helper
+    import app.ai.registry as R
+
+    folder = tmp_path / "Николай" / "модели"
+    folder.mkdir(parents=True)
+    x = helper.make_tensor_value_info("x", TensorProto.FLOAT, [1, 3, "h", "w"])
+    y = helper.make_tensor_value_info("y", TensorProto.FLOAT, [1, 3, "h", "w"])
+    m = helper.make_model(helper.make_graph([helper.make_node("Identity", ["x"], ["y"])], "g", [x], [y]), opset_imports=[helper.make_opsetid("", 13)])
+    m.ir_version = 9
+    onnx.save(m, folder / "моя_модель.onnx")
+    assert R.inspect_onnx(folder / "моя_модель.onnx")[0] == "enhancer"
+    monkeypatch.setattr(R, "MODELS_DIR", folder)
+    monkeypatch.setattr(R, "BUILTIN_MODELS", {**R.BUILTIN_MODELS, "ru_path": R.ModelSpec("ru_path", "t", "enhancer", "моя_модель.onnx")})
+    assert R.Engine("ru_path").enhance(np.full((16, 24, 3), 0.5, np.float32)).shape == (16, 24, 3)

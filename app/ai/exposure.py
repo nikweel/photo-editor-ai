@@ -40,7 +40,7 @@ class ExposureModel:
 
                 have = ort.get_available_providers()
                 prov = [p for p in ("CUDAExecutionProvider", "DmlExecutionProvider", "CoreMLExecutionProvider") if p in have]
-                self.session = ort.InferenceSession(str(path), providers=[*prov, "CPUExecutionProvider"] if device != "cpu" else ["CPUExecutionProvider"])
+                self.session = ort.InferenceSession(path.read_bytes(), providers=[*prov, "CPUExecutionProvider"] if device != "cpu" else ["CPUExecutionProvider"])
             except Exception as e:  # битая модель или нет GPU -> откат на эвристику
                 log.warning("Модель экспозиции не загружена, используем эвристику: %s", e)
 
