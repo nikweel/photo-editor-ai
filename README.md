@@ -5,7 +5,7 @@
 **Photo Editor AI** is a free, open-source desktop photo editor with **AI auto-correction**, a Photoshop-style tone curve, HSL, filter **packs** you can import and export, a Lightroom-style library and batch processing.
 It edits **non-destructively**: your originals are never modified — all edits are stored as settings and applied on export.
 
-> 🖥️ **Ubuntu first.** Built with Python, PySide6 (Qt) and ONNX Runtime, so it also runs on **Windows and macOS**. Everything runs **locally**: no cloud, no account.
+> 🖥️ **Linux, Windows and macOS.** Built with Python, PySide6 (Qt) and ONNX Runtime. Everything runs **locally**: no cloud, no account.
 
 ## Screenshots
 *(demo with a generated landscape)*
