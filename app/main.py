@@ -1,4 +1,5 @@
 import logging
+import os
 import sys
 
 from .utils.logging_setup import setup_logging
@@ -19,7 +20,22 @@ def selftest() -> int:
         if not (np.isfinite(out).all() and 0 <= out.min() and out.max() <= 1):
             print("FAIL: фильтр", f.name)
             return 1
-    print(f"OK: фильтров {len(BUILTIN)} в {len(BUILTIN_PACKS)} пакетах; PySide6 {PySide6.__version__}; ONNX Runtime {onnxruntime.__version__}")
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")  # окно не нужно: проверяем, что интерфейсные модули (в том числе значки SVG) на месте
+    from PySide6.QtWidgets import QApplication
+
+    from .gui import theme
+    from .gui.canvas import CompareCanvas
+    from .gui.icons import PATHS, icon
+    from .gui.widgets import HistogramWidget, Section
+
+    qapp = QApplication.instance() or QApplication([])
+    theme.apply(qapp)
+    for name in PATHS:
+        if icon(name).pixmap(18, 18).isNull():
+            print("FAIL: значок", name)
+            return 1
+    CompareCanvas(), HistogramWidget(), Section("проверка", True, lambda: None)
+    print(f"OK: фильтров {len(BUILTIN)} в {len(BUILTIN_PACKS)} пакетах; значков {len(PATHS)}; PySide6 {PySide6.__version__}; ONNX Runtime {onnxruntime.__version__}")
     return 0
 
 
