@@ -50,6 +50,7 @@ class CurveWidget(QWidget):
         """Гистограммы изображения под кривой (яркость и три канала)."""
         self.hist = {}
         if img is not None:
+            img = img[::4, ::4]  # для гистограммы из 64 столбцов хватает каждого 4-го пикселя: в разы быстрее, форма та же
             lum = img @ np.array([0.2126, 0.7152, 0.0722], np.float32)
             for k, ch in (("rgb", lum), ("r", img[..., 0]), ("g", img[..., 1]), ("b", img[..., 2])):
                 h = np.histogram(ch, bins=64, range=(0, 1))[0].astype(np.float32)

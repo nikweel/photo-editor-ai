@@ -13,7 +13,7 @@ from ..ai.auto import suggest
 from ..ai.registry import Engine, add_custom, download_model, is_available, models, remove_custom
 from ..core import adjust
 from ..core.adjust import CHANNELS, HSL_COLORS, EditParams
-from ..core.imageio import open_image, to_array
+from ..core.imageio import open_image, open_preview, to_array
 from ..services.batch import collect_files
 from ..services.export import ExportOptions, export_image
 from ..services.filters import DEFAULT_CATEGORY, MY_PACK, FilterStore, blend, category_order
@@ -157,13 +157,15 @@ class ExportWorker(QThread):
     done = Signal(str)
     failed = Signal(str)
 
-    def __init__(self, src, img, params, dest, opts):
+    def __init__(self, src, params, dest, opts):
         super().__init__()
-        self.args = (src, img, params, dest, opts)
+        self.args = (src, params, dest, opts)
 
     def run(self):
         try:
-            self.done.emit(str(export_image(*self.args)))
+            src, params, dest, opts = self.args
+            img = to_array(open_image(src))  # оригинал читается здесь, в фоне, и только на время экспорта
+            self.done.emit(str(export_image(src, img, params, dest, opts)))
         except Exception as e:
             log.exception("Ошибка экспорта")
             self.failed.emit(str(e))
@@ -176,7 +178,7 @@ class MainWindow(QMainWindow):
         self.setAcceptDrops(True)
         self.resize(1400, 780)  # Qt сам поднимет размер до минимума по содержимому панели
         self.src_path: Path | None = None
-        self.full: np.ndarray | None = None
+        self.full_size: tuple[int, int] | None = None  # размер оригинала в пикселях; сам оригинал читается только при экспорте
         self.preview: np.ndarray | None = None
         self.preview_small: np.ndarray | None = None
         self.preview_tiny: np.ndarray | None = None
@@ -987,7 +989,7 @@ class MainWindow(QMainWindow):
                 self._clear_view()
 
     def _clear_view(self):
-        self.preview = self.preview_small = self.preview_tiny = self.full = None
+        self.preview = self.preview_small = self.preview_tiny = self.full_size = None
         self._shown = None
         self.canvas.after = self.canvas.before = None
         self.canvas.set_message("Перетащите фото сюда или нажмите «Импорт» (Ctrl+I)")
@@ -1060,13 +1062,13 @@ class MainWindow(QMainWindow):
             self.crop_btn.setChecked(False)
         self._save_edit()  # правки предыдущего снимка остаются в каталоге
         try:
-            im = open_image(path)
+            im, full_size = open_preview(path, PREVIEW_SIDE)
         except Exception as e:
             QMessageBox.warning(self, "Ошибка", f"Не удалось открыть файл:\n{e}")
             self.src_path = None
             return
-        self.src_path, self._shown, self.full = path, path, to_array(im)
-        prev = im.copy()
+        self.src_path, self._shown, self.full_size = path, path, full_size
+        prev = im
         prev.thumbnail((PREVIEW_SIDE, PREVIEW_SIDE))
         self.preview = to_array(prev)
         small = prev.copy()
@@ -1090,7 +1092,7 @@ class MainWindow(QMainWindow):
         self.canvas.fit()
         self.strip.select_path(path)
         self.setWindowTitle(f"Photo Editor AI — {path.name}")
-        self.info.setText(f"{path.name}  ·  {im.width}×{im.height}")
+        self.info.setText(f"{path.name}  ·  {self.full_size[0]}×{self.full_size[1]}")
 
     # ---------- показ и ИИ ----------
     def _fast_source(self) -> np.ndarray:
@@ -1117,7 +1119,7 @@ class MainWindow(QMainWindow):
         key = (id(src), self.params.rotate90, self.params.flip_h, self.params.flip_v, self.params.straighten, tuple(self.params.crop), self.crop_mode)
         if key != self._before_key:  # «до» — тот же кадр без цвета; пересчитываем только при смене геометрии
             self._before, self._before_key = self._qimage(geo), key
-        self.canvas.source_width = round(geo.shape[1] * max(self.full.shape[:2]) / max(src.shape[:2]))
+        self.canvas.source_width = round(geo.shape[1] * max(self.full_size) / max(src.shape[:2]))
         self.canvas.set_pair(self._before, self._qimage(out))
         self.hist.set_image(out)
         self._zoom_changed()
@@ -1131,7 +1133,7 @@ class MainWindow(QMainWindow):
             return
         p = self.params
         key = (id(self.preview), p.rotate90, p.flip_h, p.flip_v, p.straighten, tuple(p.crop), self.crop_mode)
-        self.hq_worker = HqWorker(self._hq_gen, key, self.preview, copy.deepcopy(p), self.crop_mode, key != self._before_key, max(self.full.shape[:2]))
+        self.hq_worker = HqWorker(self._hq_gen, key, self.preview, copy.deepcopy(p), self.crop_mode, key != self._before_key, max(self.full_size))
         self.hq_worker.done.connect(self._hq_done)
         self.hq_worker.start()
 
@@ -1201,7 +1203,7 @@ class MainWindow(QMainWindow):
 
     # ---------- экспорт ----------
     def save_dialog(self):
-        if self.full is None:
+        if self.full_size is None:
             self.status.setText("Нечего экспортировать: откройте фото")
             return
         if self.export_worker and self.export_worker.isRunning():
@@ -1215,7 +1217,7 @@ class MainWindow(QMainWindow):
         if d.target.exists() and QMessageBox.question(self, "Файл существует", f"Заменить {d.target.name}?") != QMessageBox.Yes:
             return
         self.status.setText("Экспорт…")
-        self.export_worker = ExportWorker(self.src_path, self.full, copy.deepcopy(self.params), d.target, d.options)
+        self.export_worker = ExportWorker(self.src_path, copy.deepcopy(self.params), d.target, d.options)
         self.export_worker.done.connect(lambda p: self.status.setText(f"Сохранено: {Path(p).name}"))
         self.export_worker.failed.connect(lambda m: (self.status.setText("Ошибка экспорта"), QMessageBox.warning(self, "Экспорт не удался", m)))
         self.export_worker.start()

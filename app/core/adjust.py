@@ -1,4 +1,6 @@
 """Неразрушающие правки: параметры отдельно от пикселей, применяются к исходнику заново при каждом изменении."""
+import os
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field, fields
 from functools import lru_cache
 
@@ -150,10 +152,14 @@ def _lut_apply(a: np.ndarray, lut: np.ndarray) -> np.ndarray:
     return np.take(lut, (a * n + 0.5).astype(np.int32).clip(0, n))
 
 
-def apply(img: np.ndarray, p: EditParams) -> np.ndarray:
-    """img: float32 [H, W, 3] sRGB 0..1 -> результат того же вида."""
-    if p.color_is_identity():
-        return img
+def _tables(p: EditParams) -> dict:
+    """Таблицы, общие для всех полос кадра (кривые и правки по оттенку): считаются один раз, а не в каждой полосе."""
+    return {"curves": {k: (curve_lut(p.curves[k], 4096) if p.curves[k] != IDENTITY_CURVE else None) for k in CHANNELS},
+            "hue": None if p.hsl_is_identity() else _hue_tables(p.hsl)}
+
+
+def _pointwise(img: np.ndarray, p: EditParams, tabs: dict) -> np.ndarray:
+    """Всё, что зависит только от самого пикселя (экспозиция, цвет, HSL, кривые, LUT): годится для расчёта независимыми полосами."""
     out = img
     if p.temperature or p.tint or p.exposure:  # перевод в линейный свет и обратно дорог, поэтому — только если нужен
         lin = srgb_to_linear(img)
@@ -179,14 +185,14 @@ def apply(img: np.ndarray, p: EditParams) -> np.ndarray:
         sat = (_cmax(out) - _cmin(out))[..., None]
         k = 1 + p.saturation + p.vibrance * (1 - sat)  # вибранс усиливает в основном бледные цвета
         out = gray + (out - gray) * np.clip(k, 0, 3)
-    out = np.clip(out, 0, 1).astype(np.float32)
-    if not p.hsl_is_identity():
-        out = _apply_hsl(out, p.hsl)
-    if not p.curve_is_identity():
-        out = _lut_apply(out, curve_lut(p.curves["rgb"], 4096)) if p.curves["rgb"] != IDENTITY_CURVE else out
-        for i, c in enumerate("rgb"):
-            if p.curves[c] != IDENTITY_CURVE:
-                out[..., i] = _lut_apply(out[..., i], curve_lut(p.curves[c], 4096))
+    out = np.clip(out, 0, 1).astype(np.float32)  # новый массив: дальше правим его на месте, исходный кадр не трогаем
+    if tabs["hue"] is not None:
+        out = _apply_hsl(out, tabs["hue"])
+    if tabs["curves"]["rgb"] is not None:
+        out = _lut_apply(out, tabs["curves"]["rgb"])
+    for i, c in enumerate("rgb"):
+        if tabs["curves"][c] is not None:
+            out[..., i] = _lut_apply(out[..., i], tabs["curves"][c])
     if p.lut:
         try:
             from .lut import apply_lut
@@ -194,7 +200,56 @@ def apply(img: np.ndarray, p: EditParams) -> np.ndarray:
             out = apply_lut(out, p.lut, p.lut_strength)
         except Exception:  # файл фильтра удалён или повреждён — остальные правки всё равно показываем
             pass
-    return _details(out, p)
+    return out
+
+
+_POOL: ThreadPoolExecutor | None = None
+BLOCK_PIXELS = 25_000  # размер блока: ~300 КБ целиком помещается в кэш процессора; замеры: мельче — накладные расходы, крупнее — упор в память
+
+
+def _workers() -> int:
+    return max(1, min(8, (os.cpu_count() or 2)))
+
+
+def _bands(pixels: int) -> int:
+    """На сколько горизонтальных полос резать кадр: блоки по ~25 тыс. пикселей раздаются потокам по очереди. Мелкие блоки быстрее
+    даже без потоков (кэш процессора), а потоки добавляют ещё ускорение."""
+    return max(1, pixels // BLOCK_PIXELS)
+
+
+def _par(fn, *arrays: np.ndarray) -> np.ndarray:
+    """Применить fn к соответствующим горизонтальным полосам массивов (первая ось — строки) в пуле потоков и собрать результат.
+    Годится для операций, где каждый пиксель считается независимо. Операции numpy отпускают GIL, поэтому потоки работают параллельно;
+    результат тот же, что при расчёте целиком."""
+    global _POOL
+    ref = arrays[0]
+    h = ref.shape[0]
+    n = min(_bands(h * (ref.shape[1] if ref.ndim > 1 else 1)), h)
+    if n <= 1:
+        return fn(*arrays)
+    if _POOL is None:
+        _POOL = ThreadPoolExecutor(max_workers=_workers(), thread_name_prefix="adjust")
+    edges = np.linspace(0, h, n + 1).astype(int)
+    first = fn(*[a[edges[0]:edges[1]] for a in arrays])  # форма и тип результата выясняются по первой полосе
+    out = np.empty((h,) + first.shape[1:], first.dtype)
+    out[edges[0]:edges[1]] = first
+
+    def job(i: int) -> None:
+        out[edges[i]:edges[i + 1]] = fn(*[a[edges[i]:edges[i + 1]] for a in arrays])
+
+    list(_POOL.map(job, range(1, n)))  # list(): исключение из полосы всплывает здесь
+    return out
+
+
+def _run_pointwise(img: np.ndarray, p: EditParams, tabs: dict) -> np.ndarray:
+    return _par(lambda band: _pointwise(band, p, tabs), img)
+
+
+def apply(img: np.ndarray, p: EditParams) -> np.ndarray:
+    """img: float32 [H, W, 3] sRGB 0..1 -> результат того же вида."""
+    if p.color_is_identity():
+        return img
+    return _details(_run_pointwise(img, p, _tables(p)), p)
 
 
 def _cmax(a: np.ndarray) -> np.ndarray:
@@ -251,10 +306,9 @@ def _hue_tables(hsl: dict):
     return tab
 
 
-def _apply_hsl(a: np.ndarray, hsl: dict) -> np.ndarray:
-    """Оттенок, насыщенность и яркость по восьми цветам. Серые пиксели не затрагиваются: правка растёт вместе с насыщенностью пикселя."""
+def _apply_hsl(a: np.ndarray, tab: np.ndarray) -> np.ndarray:
+    """Оттенок, насыщенность и яркость по восьми цветам (tab — из _hue_tables). Серые пиксели не затрагиваются: правка растёт вместе с насыщенностью пикселя."""
     h, s, v = _rgb_to_hsv(a)
-    tab = _hue_tables(hsl)
     bi = np.minimum((h * np.float32(_HSL_RES / 360.0)).astype(np.int32), _HSL_RES - 1)
     dh, ds, dv = tab[0][bi], tab[1][bi], tab[2][bi]
     chroma = np.clip(s * 2.0, 0, 1)  # почти серое не получает чужой оттенок и яркость
@@ -266,16 +320,19 @@ def _apply_hsl(a: np.ndarray, hsl: dict) -> np.ndarray:
 
 def _blur(a: np.ndarray, radius: float) -> np.ndarray:
     """Гауссово размытие (PIL, быстро и на больших кадрах); точность 8 бит достаточна для слоя деталей.
-    Большой радиус (чёткость, дымка) даёт только низкие частоты, поэтому считается на уменьшенной копии."""
-    im = Image.fromarray((np.clip(a, 0, 1) * 255 + 0.5).astype(np.uint8))  # 2D — режим L, 3D — RGB
+    Большой радиус (чёткость, дымка) даёт только низкие частоты, поэтому считается на уменьшенной копии.
+    Переводы в 8 бит и обратно идут блоками в потоках: сам PIL однопоточный, а преобразования массива были не меньше его по времени."""
+    im = Image.fromarray(_par(lambda x: (np.clip(x, 0, 1) * 255 + 0.5).astype(np.uint8), a))  # 2D — режим L, 3D — RGB
     f = int(radius // 6)  # во сколько раз уменьшать: радиус после уменьшения остаётся ≥ ~6 px
     if f >= 2:
         small = im.reduce(f).filter(ImageFilter.GaussianBlur(max(radius / f, 0.3)))
-        return np.asarray(small.resize(im.size, Image.BILINEAR), np.float32) / 255
-    return np.asarray(im.filter(ImageFilter.GaussianBlur(max(radius, 0.3))), np.float32) / 255
+        res = np.asarray(small.resize(im.size, Image.BILINEAR))
+    else:
+        res = np.asarray(im.filter(ImageFilter.GaussianBlur(max(radius, 0.3))))
+    return _par(lambda x: x.astype(np.float32) / 255, res)
 
 
-@lru_cache(maxsize=4)
+@lru_cache(maxsize=2)
 def _vignette_mask(h: int, w: int) -> np.ndarray:
     """Маска виньетки (0 в центре, 1 по углам); не зависит от силы, поэтому кэшируется по размеру кадра."""
     yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
@@ -284,7 +341,7 @@ def _vignette_mask(h: int, w: int) -> np.ndarray:
     return (m * m * (3 - 2 * m))[..., None].astype(np.float32)
 
 
-@lru_cache(maxsize=4)
+@lru_cache(maxsize=2)
 def _grain_noise(h: int, w: int) -> np.ndarray:
     """Воспроизводимое зерно; размер зерна как на превью 1600 px."""
     k = min(1.0, 1600 / max(h, w))
@@ -294,7 +351,7 @@ def _grain_noise(h: int, w: int) -> np.ndarray:
 
 def _details(out: np.ndarray, p: EditParams) -> np.ndarray:
     """Резкость, локальный контраст, цветовой шум, виньетка, зерно. Радиусы заданы долей длинной стороны,
-    поэтому превью и полный кадр выглядят одинаково."""
+    поэтому превью и полный кадр выглядят одинаково. Размытие считается по всему кадру, а арифметика вокруг него — блоками в потоках."""
     if not (p.sharpen or p.clarity or p.texture or p.dehaze or p.noise_color or p.vignette or p.grain):
         return out
     h, w, _ = out.shape
@@ -305,26 +362,37 @@ def _details(out: np.ndarray, p: EditParams) -> np.ndarray:
         out = y + (out - y) * (1 - p.noise_color) + chroma * p.noise_color
     if p.dehaze:
         if p.dehaze > 0:  # убираем «вуаль»: чем светлее тёмный канал в окрестности, тем больше дымки
-            veil = _blur(_cmin(out), side * 0.03)[..., None] * p.dehaze * 0.6  # один канал: размытие втрое дешевле
-            out = (out - veil) / np.maximum(1 - veil, 0.2)
+            veil = _par(lambda b: b[..., None] * p.dehaze * 0.6, _blur(_cmin(out), side * 0.03))  # один канал: размытие втрое дешевле
+            out = _par(lambda a, v: np.clip((a - v) / np.maximum(1 - v, 0.2), 0, 1), out, veil)
         else:
             v = -p.dehaze * 0.3
-            out = out * (1 - v) + v * 0.85
-        out = np.clip(out, 0, 1)
+            out = _par(lambda a: np.clip(a * (1 - v) + v * 0.85, 0, 1), out)
     if p.texture:
-        out = out + (out - _blur(out, max(side * 0.004, 0.8))) * p.texture * 1.2
+        out = _par(lambda a, b: a + (a - b) * p.texture * 1.2, out, _blur(out, max(side * 0.004, 0.8)))
     if p.clarity:
-        lum = np.clip(out @ LUMA, 0, 1)[..., None]
-        mid = 1 - np.abs(2 * lum - 1) ** 2  # маска средних тонов: света и тени не «плавятся»
-        out = out + (out - _blur(out, side * 0.02)) * p.clarity * 0.9 * mid
+        def clarity(a, b):
+            lum = np.clip(a @ LUMA, 0, 1)[..., None]
+            mid = 1 - np.abs(2 * lum - 1) ** 2  # маска средних тонов: света и тени не «плавятся»
+            return a + (a - b) * p.clarity * 0.9 * mid
+
+        out = _par(clarity, out, _blur(out, side * 0.02))
     if p.sharpen:
-        out = out + (out - _blur(out, max(side * 0.0012, 0.6))) * p.sharpen * 1.6
-    if p.vignette:
-        m = _vignette_mask(h, w)
-        out = out * (1 + p.vignette * m) if p.vignette < 0 else out + (1 - out) * p.vignette * m * 0.8
-    if p.grain:
-        out = out + _grain_noise(h, w) * p.grain * 0.06
-    return np.clip(out, 0, 1).astype(np.float32)
+        out = _par(lambda a, b: a + (a - b) * p.sharpen * 1.6, out, _blur(out, max(side * 0.0012, 0.6)))
+    if p.vignette or p.grain:
+        extra = ([_vignette_mask(h, w)] if p.vignette else []) + ([_grain_noise(h, w)] if p.grain else [])
+
+        def vignette_grain(a, *rest):
+            i = 0
+            if p.vignette:
+                m = rest[i]
+                i += 1
+                a = a * (1 + p.vignette * m) if p.vignette < 0 else a + (1 - a) * p.vignette * m * 0.8
+            if p.grain:
+                a = a + rest[i] * p.grain * 0.06
+            return a
+
+        out = _par(vignette_grain, out, *extra)
+    return _par(lambda a: np.clip(a, 0, 1).astype(np.float32), out)
 
 
 def apply_geometry(img: np.ndarray, p: EditParams, crop: bool = True) -> np.ndarray:

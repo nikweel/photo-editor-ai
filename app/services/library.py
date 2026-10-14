@@ -11,7 +11,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from ..core.imageio import RAW_EXT, open_image
+from ..core.imageio import RAW_EXT, open_preview
 from ..utils.paths import DATA_DIR
 
 log = logging.getLogger(__name__)
@@ -113,7 +113,7 @@ def thumb_for(path: Path, side: int = THUMB_SIDE) -> Path | None:
         key = hashlib.sha1(f"{path}|{path.stat().st_mtime_ns}|{side}".encode()).hexdigest()
         t = THUMB_DIR / f"{key}.jpg"
         if not t.exists():
-            im = open_image(path)
+            im, _ = open_preview(path, side * 2)  # JPEG декодируется уже уменьшенным
             im.thumbnail((side, side))
             THUMB_DIR.mkdir(parents=True, exist_ok=True)
             im.save(t, quality=85)

@@ -523,3 +523,50 @@ def test_model_in_non_ascii_path(tmp_path, monkeypatch):
     monkeypatch.setattr(R, "MODELS_DIR", folder)
     monkeypatch.setattr(R, "BUILTIN_MODELS", {**R.BUILTIN_MODELS, "ru_path": R.ModelSpec("ru_path", "t", "enhancer", "моя_модель.onnx")})
     assert R.Engine("ru_path").enhance(np.full((16, 24, 3), 0.5, np.float32)).shape == (16, 24, 3)
+
+
+def test_banded_pointwise_is_identical_to_whole(monkeypatch):
+    """Расчёт полосами в потоках даёт тот же результат бит в бит, что и расчёт целиком (пиксели друг от друга не зависят)."""
+    import numpy as np
+    from app.core import adjust
+    from app.services.filters import BUILTIN, blend
+
+    img = np.random.default_rng(2).random((301, 257, 3)).astype(np.float32)  # размеры не кратны числу полос
+    for f in (x for x in BUILTIN if x.name in ("Dark & Moody", "Кино · Тёмный янтарь", "Контрастный Ч/Б (красный фильтр)", "Яркий")):
+        p = blend(f.params, 0.7)
+        tabs = adjust._tables(p)
+        monkeypatch.setattr(adjust, "_bands", lambda px: 1)
+        whole = adjust._run_pointwise(img, p, tabs)
+        monkeypatch.setattr(adjust, "_bands", lambda px: 37)
+        banded = adjust._run_pointwise(img, p, tabs)
+        assert np.array_equal(whole, banded), f.name
+        assert np.array_equal(adjust.apply(img, p), adjust._details(banded, p)), f.name
+
+
+def test_open_preview_draft_and_orientation(tmp_path, monkeypatch):
+    """Быстрый предпросмотр: JPEG декодируется уменьшенным, но не меньше запрошенного; размер оригинала и поворот по EXIF сохранены."""
+    import numpy as np
+    from PIL import Image
+    from app.core.imageio import open_preview
+    import app.services.library as L
+    from app.services.library import thumb_for
+
+    monkeypatch.setattr(L, "THUMB_DIR", tmp_path / "thumbs")  # кэш миниатюр — во временную папку, не в данные пользователя
+    big = Image.fromarray((np.random.default_rng(0).random((900, 1600, 3)) * 255).astype(np.uint8))
+    p = tmp_path / "a.jpg"
+    big.save(p, quality=90)
+    im, full = open_preview(p, 400)
+    assert full == (1600, 900) and max(im.size) >= 400 and max(im.size) < 1600  # уменьшено декодером, но не ниже запрошенного
+    im, full = open_preview(p, 5000)
+    assert im.size == (1600, 900)  # больше оригинала не раздуваем
+    ex = big.getexif()
+    ex[274] = 6  # снимок снят «на боку»: хранится 1600x900, показывать нужно 900x1600
+    q = tmp_path / "rot.jpg"
+    big.save(q, exif=ex.tobytes())
+    im, full = open_preview(q, 5000)
+    assert full == (900, 1600) and im.size == (900, 1600)
+    png = tmp_path / "b.png"
+    big.save(png)
+    assert open_preview(png, 200)[1] == (1600, 900)
+    t = thumb_for(p)
+    assert t is not None and max(Image.open(t).size) <= 192
