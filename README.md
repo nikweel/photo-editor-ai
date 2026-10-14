@@ -65,7 +65,14 @@ A single filter uses `"format": "photo-editor-ai-filter"` with `name`, `category
 ## Keyboard
 `Ctrl+I` import · `Ctrl+S` export · `Ctrl+Z` / `Ctrl+Shift+Z` undo / redo · `\` before/after · mouse wheel zoom · `Ctrl+0` / `Ctrl+1` fit / 100% · `Alt+←/→` previous/next photo · `0`–`5` rating · `Ctrl+Shift+C/V` copy/paste settings · `Enter` / `Esc` apply/cancel crop · `F1` help.
 
-## Install and run (Ubuntu)
+## Download (no Python needed)
+Get the file for Ubuntu / Debian-based systems from the [**Releases**](https://github.com/nikweel/photo-editor-ai/releases/latest) page:
+- **`.deb`** — `sudo apt install ./Photo-Editor-AI-<version>-amd64.deb`
+- **`.AppImage`** — `chmod +x Photo-Editor-AI-*.AppImage && ./Photo-Editor-AI-*.AppImage`
+
+The installed app keeps its catalog, filters and models in `~/.local/share/Photo-Editor-AI/`. Checksums are published as `SHA256SUMS.txt`. Windows and macOS builds are not available yet.
+
+## Run from source (Ubuntu)
 You need [uv](https://docs.astral.sh/uv/) (it installs Python for you).
 ```bash
 git clone https://github.com/nikweel/photo-editor-ai.git
@@ -86,7 +93,7 @@ QT_QPA_PLATFORM=offscreen uv run python scripts/make_screenshots.py   # regenera
 Layout: `app/core` (image engine: curves, HSL, mixer, details, geometry, LUT) · `app/ai` (models and auto-correction) · `app/services` (library, filters and packs, batch, export) · `app/gui` (Qt interface) · `scripts` (model export, screenshots, filter fitting).
 
 ## Roadmap
-Windows and macOS builds, AppImage / `.deb` packages, local adjustments (masks and brushes), a channel-mixer panel, more AI models, more interface languages.
+Windows and macOS builds, local adjustments (masks and brushes), a channel-mixer panel, more AI models, more interface languages.
 
 ## License
 [MIT](LICENSE). Third-party components and the IAT model weights: see [NOTICE](NOTICE).

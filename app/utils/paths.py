@@ -4,6 +4,8 @@ from pathlib import Path
 
 FROZEN = bool(getattr(sys, "frozen", False))
 APP_NAME = "Photo-Editor-AI"
+# папка с ресурсами (иконка и т. п.): в собранной программе — временная папка PyInstaller
+RESOURCES = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2]))
 
 
 def _user_data_dir() -> Path:
@@ -19,3 +21,4 @@ ROOT = _user_data_dir() if FROZEN else Path(__file__).resolve().parents[2]
 MODELS_DIR = ROOT / "models"
 DATA_DIR = ROOT / "data"
 LOG_DIR = DATA_DIR / "logs"
+ICON = RESOURCES / "assets" / "icon.png"

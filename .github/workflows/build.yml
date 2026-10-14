@@ -1,0 +1,49 @@
+name: Build
+on:
+  push:
+    tags: ["app-v*"]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Version
+        shell: bash
+        run: |
+          V="${GITHUB_REF_NAME#app-v}"; [ "$GITHUB_REF_TYPE" = tag ] || V=0.0.0-dev
+          echo "APP_VERSION=$V" >> "$GITHUB_ENV"
+      - name: Tests
+        run: uv run --python 3.12 pytest -q
+      - name: Build bundle
+        run: uv run --python 3.12 --with pyinstaller pyinstaller --noconfirm packaging.spec
+      - name: Self-test of the built app
+        run: QT_QPA_PLATFORM=offscreen dist/Photo-Editor-AI/Photo-Editor-AI --selftest
+      - name: Linux packages (.deb and AppImage)
+        run: sh packaging/linux.sh "$APP_VERSION"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: release/*
+      - name: Publish release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+  checksums:
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: SHA256SUMS
+        run: cd artifacts && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/SHA256SUMS.txt

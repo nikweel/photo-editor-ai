@@ -65,7 +65,14 @@
 ## Клавиши
 `Ctrl+I` импорт · `Ctrl+S` экспорт · `Ctrl+Z` / `Ctrl+Shift+Z` отмена / повтор · `\` до/после · колесо мыши — масштаб · `Ctrl+0` / `Ctrl+1` вписать / 100% · `Alt+←/→` предыдущее/следующее фото · `0`–`5` рейтинг · `Ctrl+Shift+C/V` копировать/вставить настройки · `Enter` / `Esc` применить/отменить кадр · `F1` справка.
 
-## Установка и запуск (Ubuntu)
+## Скачать (Python не нужен)
+Файл для Ubuntu и систем на базе Debian — на странице [**Releases**](https://github.com/nikweel/photo-editor-ai/releases/latest):
+- **`.deb`** — `sudo apt install ./Photo-Editor-AI-<версия>-amd64.deb`
+- **`.AppImage`** — `chmod +x Photo-Editor-AI-*.AppImage && ./Photo-Editor-AI-*.AppImage`
+
+Установленная программа хранит каталог, фильтры и модели в `~/.local/share/Photo-Editor-AI/`. Контрольные суммы лежат в `SHA256SUMS.txt`. Сборок для Windows и macOS пока нет.
+
+## Запуск из исходников (Ubuntu)
 Нужен [uv](https://docs.astral.sh/uv/) (он сам установит Python).
 ```bash
 git clone https://github.com/nikweel/photo-editor-ai.git
@@ -86,7 +93,7 @@ QT_QPA_PLATFORM=offscreen uv run python scripts/make_screenshots.py   # пере
 Структура: `app/core` (движок изображения: кривые, HSL, микшер, детали, геометрия, LUT) · `app/ai` (модели и автокоррекция) · `app/services` (каталог, фильтры и пакеты, пакетная обработка, экспорт) · `app/gui` (интерфейс Qt) · `scripts` (экспорт моделей, скриншоты, подгонка фильтров).
 
 ## Планы
-Сборки для Windows и macOS, пакеты AppImage и `.deb`, локальные правки (маски и кисти), панель микшера каналов, больше ИИ-моделей, больше языков интерфейса.
+Сборки для Windows и macOS, локальные правки (маски и кисти), панель микшера каналов, больше ИИ-моделей, больше языков интерфейса.
 
 ## Лицензия
 [MIT](LICENSE). Сторонние компоненты и веса модели IAT: см. [NOTICE](NOTICE).
