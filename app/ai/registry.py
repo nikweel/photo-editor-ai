@@ -158,12 +158,19 @@ def is_available(model_id: str) -> bool:
 
 
 def _session(spec: ModelSpec, device: str):
+    """Сессия ONNX Runtime. GPU-провайдер (CUDA, DirectML, CoreML) пробуется первым, но любая проблема с ним — нет подходящего
+    устройства, неподдерживаемая операция — не должна ломать ИИ: тихо переходим на процессор."""
     import onnxruntime as ort
 
+    path = str(MODELS_DIR / spec.file)
     have = ort.get_available_providers()
     gpu = [p for p in ("CUDAExecutionProvider", "DmlExecutionProvider", "CoreMLExecutionProvider") if p in have]
-    prov = ["CPUExecutionProvider"] if device == "cpu" else [*gpu, "CPUExecutionProvider"]
-    return ort.InferenceSession(str(MODELS_DIR / spec.file), providers=prov)
+    if device != "cpu" and gpu:
+        try:
+            return ort.InferenceSession(path, providers=[*gpu, "CPUExecutionProvider"])
+        except Exception as e:
+            log.warning("GPU (%s) недоступен для модели %s, используем процессор: %s", gpu, spec.id, e)
+    return ort.InferenceSession(path, providers=["CPUExecutionProvider"])
 
 
 class Engine:
@@ -173,10 +180,22 @@ class Engine:
         self.spec = models()[model_id]
         self.session = None
         self.fixed_hw = None
+        self._cpu = device == "cpu"  # уже на процессоре — запасного варианта нет
         if self.spec.kind != "builtin":
-            self.session = _session(self.spec, device)  # ошибка загрузки пробрасывается: пользователь выбрал именно эту модель
+            self.session = _session(self.spec, device)  # ошибка загрузки (даже на процессоре) пробрасывается: пользователь выбрал именно эту модель
             shp = self.session.get_inputs()[0].shape
             self.fixed_hw = (shp[2], shp[3]) if isinstance(shp[2], int) and isinstance(shp[3], int) else None  # модель с жёстким размером входа
+
+    def _run(self, feed: dict):
+        """Расчёт на текущем устройстве; если GPU споткнулся прямо в работе, один раз пересоздаём сессию на процессоре и повторяем."""
+        try:
+            return self.session.run(None, feed)
+        except Exception as e:
+            if self._cpu:
+                raise
+            log.warning("Ошибка расчёта на GPU, переходим на процессор: %s", e)
+            self.session, self._cpu = _session(self.spec, "cpu"), True
+            return self.session.run(None, feed)
 
     @property
     def is_enhancer(self) -> bool:
@@ -186,7 +205,7 @@ class Engine:
         if self.spec.kind == "ev":
             side = self.fixed_hw or (exposure.SIZE, exposure.SIZE)
             small = to_array(from_array(img).resize((side[1], side[0]), Image.BICUBIC)).transpose(2, 0, 1)[None]
-            ev = float(self.session.run(None, {self.session.get_inputs()[0].name: small})[0].reshape(-1)[0])
+            ev = float(self._run({self.session.get_inputs()[0].name: small})[0].reshape(-1)[0])
             return float(np.clip(ev, -exposure.MAX_EV, exposure.MAX_EV))
         return exposure.heuristic_ev(img)
 
@@ -200,7 +219,7 @@ class Engine:
             sh, sw = self.fixed_hw
         small = img if (sw, sh) == (w, h) else to_array(from_array(img).resize((sw, sh), Image.LANCZOS))
         x = small.transpose(2, 0, 1)[None].astype(np.float32)
-        y = self.session.run(None, {self.session.get_inputs()[0].name: x})[0][0].transpose(1, 2, 0)
+        y = self._run({self.session.get_inputs()[0].name: x})[0][0].transpose(1, 2, 0)
         y = np.clip(y, 0, 1)
         if (sw, sh) == (w, h):
             return y.astype(np.float32)

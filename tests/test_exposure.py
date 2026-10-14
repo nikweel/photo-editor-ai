@@ -462,3 +462,44 @@ def test_model_download_verified(tmp_path):
     for m in BUILTIN_MODELS.values():  # у встроенных моделей из релиза заданы адрес с github.com, размер и контрольная сумма
         if m.url:
             assert m.url.startswith("https://github.com/") and m.size_bytes > 0 and len(m.sha256) == 64
+
+
+def test_gpu_failure_falls_back_to_cpu(tmp_path, monkeypatch):
+    """Видеокарта «есть» в списке провайдеров, но сессия на ней не создаётся или падает в работе (так ведёт себя DirectML на машине
+    без подходящего устройства): ИИ обязан тихо перейти на процессор."""
+    import numpy as np
+    import onnx
+    import onnxruntime as ort
+    from onnx import TensorProto, helper
+    import app.ai.registry as R
+
+    x = helper.make_tensor_value_info("x", TensorProto.FLOAT, [1, 3, "h", "w"])
+    y = helper.make_tensor_value_info("y", TensorProto.FLOAT, [1, 3, "h", "w"])
+    m = helper.make_model(helper.make_graph([helper.make_node("Identity", ["x"], ["y"])], "g", [x], [y]), opset_imports=[helper.make_opsetid("", 13)])
+    m.ir_version = 9
+    onnx.save(m, tmp_path / "id.onnx")
+    monkeypatch.setattr(R, "MODELS_DIR", tmp_path)
+    monkeypatch.setattr(R, "BUILTIN_MODELS", {**R.BUILTIN_MODELS, "gpu_test": R.ModelSpec("gpu_test", "t", "enhancer", "id.onnx")})
+    real, calls = ort.InferenceSession, []
+    monkeypatch.setattr(ort, "get_available_providers", lambda: ["DmlExecutionProvider", "CPUExecutionProvider"])
+    img = np.full((16, 24, 3), 0.4, np.float32)
+
+    def broken_init(path, providers=None, **kw):  # DirectML не может создать сессию
+        calls.append(tuple(providers))
+        if "DmlExecutionProvider" in providers:
+            raise RuntimeError("No devices detected that match the filter criteria")
+        return real(path, providers=providers, **kw)
+
+    monkeypatch.setattr(ort, "InferenceSession", broken_init)
+    out = R.Engine("gpu_test").enhance(img)
+    assert out.shape == img.shape and ("DmlExecutionProvider", "CPUExecutionProvider") in calls and ("CPUExecutionProvider",) in calls
+
+    class BrokenRun:  # сессия создалась, но расчёт на GPU падает
+        def __init__(self, inner): self.inner = inner
+        def run(self, *a, **k): raise RuntimeError("DML failed")
+        def get_inputs(self): return self.inner.get_inputs()
+
+    monkeypatch.setattr(ort, "InferenceSession", lambda path, providers=None, **kw: real(path, providers=providers, **kw))
+    e = R.Engine("gpu_test")
+    e.session = BrokenRun(e.session)
+    assert e.enhance(img).shape == img.shape and e._cpu  # после сбоя работает на процессоре
