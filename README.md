@@ -24,11 +24,25 @@ Two buttons on the **Auto · AI** tab: **exposure + colour** or **exposure only*
   | Model | Size | What it is for |
   |---|---|---|
   | **Built-in (histogram)** | — | No neural network, always works |
-  | **IAT — exposure** | 0.5 MB | Fixes over- and under-exposure (default when installed) |
+  | **Smart exposure (scene-aware)** | 44.6 MB | Tells a night scene from an overexposed frame and a portrait in the dark from intentional darkness; names the scene (default) |
+  | **IAT — exposure** | 0.5 MB | Fixes over- and under-exposure |
   | **IAT — low light** | 0.5 MB | Dark shots; brightens more aggressively |
   | **Your own ONNX model** | — | *Add your own…* detects the kind automatically (EV regressor or image→image) and validates it with a test run |
 
   The IAT models are the official [Illumination-Adaptive Transformer](https://github.com/cuiziteng/Illumination-Adaptive-Transformer) weights (Apache 2.0) converted to ONNX — see [NOTICE](NOTICE) and `scripts/export_iat.py`.
+
+  **Scene-aware model.** DINOv2-small (Apache 2.0) embedding + luminance statistics → a tiny trained head predicts the exposure correction and the scene type. It was trained self-supervised on ~1800 freely licensed Wikimedia Commons photos (attribution: [docs/training_attribution.csv](docs/training_attribution.csv)) with synthetic exposure shifts; a held-out 20% of frames never took part in training. Benchmark (`scripts/train/benchmark_auto.py`, 367 held-out frames × shifts of −2…+2 EV, mean error of the correction, lower is better):
+
+  | | Histogram | IAT (as used before) | Scene-aware |
+  |---|---|---|---|
+  | All scenes | 0.83 EV | 0.66 EV | **0.45 EV** |
+  | Night | 1.40 EV | 0.94 EV | **0.60 EV** |
+  | Portrait | 0.74 EV | 0.59 EV | **0.41 EV** |
+  | Landscape | 0.53 EV | 0.52 EV | **0.35 EV** |
+
+  The test assumes the original photo is "correctly exposed", so it measures consistency with typical photographs, not a photographer's taste; single frames can still be wrong (scene type is recognised ~71% of the time) — the result is just sliders you can adjust. Details: [docs/TRAINING_DATA.md](docs/TRAINING_DATA.md).
+
+- **My style.** On the *Auto · AI* tab, *Train on my edits* learns from the photos you edited in the catalog (at least 12) and *Apply my style* proposes your usual settings (exposure, shadows, warmth…) for a new photo. Learning is local, the quality estimate is leave-one-out.
 
 ## Manual adjustments
 - **Light:** exposure, contrast, highlights, shadows, whites, blacks. **Colour:** temperature, tint, vibrance, saturation.
@@ -91,7 +105,7 @@ uv sync
 uv run python -m app.main            # or: uv run python -m app.main photo.jpg
 ```
 - Everything is stored next to the project (portable): the catalog and your filters in `data/`, models in `models/`.
-- On the first *Auto* click the app offers to download the selected AI model (0.5 MB) from the [Releases](https://github.com/nikweel/photo-editor-ai/releases) page.
+- On the first *Auto* click the app offers to download the selected AI model (0.5 MB, or 45 MB for the scene-aware one) from the [Releases](https://github.com/nikweel/photo-editor-ai/releases) page.
 - If Qt cannot start on X11, install `libxcb-cursor0` (`sudo apt install libxcb-cursor0`).
 
 ## Development

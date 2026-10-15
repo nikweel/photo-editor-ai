@@ -52,7 +52,7 @@ def _target(src: Path, o: BatchOptions) -> Path:
 def process_one(src: Path, engine: Engine, o: BatchOptions) -> Path:
     img = to_array(open_image(src))
     if o.auto:
-        sug = {k: v * o.strength for k, v in suggest(engine, img, o.auto).items()}
+        sug = {k: v * o.strength for k, v in suggest(engine, img, o.auto).items() if k not in ("scene", "verdict")}
         img = adjust.apply(img, EditParams(**sug))
     p = copy.deepcopy(o.params) if o.params is not None else EditParams()
     p.contrast = min(max(p.contrast + o.contrast, -1.0), 1.0)

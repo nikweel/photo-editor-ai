@@ -12,6 +12,17 @@ IAT — Illumination-Adaptive Transformer (low-light enhancement / exposure corr
   pretrained weights (IAT_enhance/best_Epoch_exposure.pth and best_Epoch_lol_v1.pth) converted to ONNX with scripts/export_iat.py.
   Changes: export to ONNX only (no retraining); inference wrapper rewritten without a Python loop over the batch.
 
+DINOv2 (small) — image embeddings used by the scene-aware exposure model
+  Authors: Meta AI Research (Oquab et al.), https://github.com/facebookresearch/dinov2 , weights facebook/dinov2-small
+  License: Apache License 2.0
+  The "models-v0.2" release contains dinov2_small.onnx (the CLS/pooled embedding exported to ONNX, no retraining) and exposure_scene.onnx
+  (a small head trained for this project, see docs/TRAINING_DATA.md).
+
+Training photographs
+--------------------
+The scene-aware head was trained on photographs from Wikimedia Commons under CC0, public domain or CC BY licenses.
+Authors and licenses: docs/training_attribution.csv. The photographs themselves are not redistributed.
+
 Libraries (not bundled in the repository; installed from PyPI)
 --------------------------------------------------------------
 PySide6 / Qt for Python  — LGPL-3.0 (https://www.qt.io/qt-for-python)

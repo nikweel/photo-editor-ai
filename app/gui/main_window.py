@@ -9,8 +9,9 @@ from PySide6.QtGui import QColor, QDesktopServices, QIcon, QImage, QKeySequence,
 from PySide6.QtWidgets import (QComboBox, QFileDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox,
                                QPushButton, QSlider, QTabWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
+from ..ai import style
 from ..ai.auto import suggest
-from ..ai.registry import Engine, add_custom, download_model, is_available, models, remove_custom
+from ..ai.registry import Engine, add_custom, download_model, is_available, models, remove_custom, total_size
 from ..core import adjust
 from ..core.adjust import CHANNELS, HSL_COLORS, EditParams
 from ..core.imageio import from_array, open_image, open_preview, to_array
@@ -122,6 +123,22 @@ def _button(text: str, fn, primary: bool = False, shortcut: str | None = None, t
     b.setCursor(Qt.PointingHandCursor)
     b.clicked.connect(fn)
     return b
+
+
+class StyleWorker(QThread):
+    done = Signal(object)  # StyleModel или None, если правленых кадров мало
+    failed = Signal(str)
+
+    def __init__(self, entries):
+        super().__init__()
+        self.entries = entries
+
+    def run(self):
+        try:
+            self.done.emit(style.train(self.entries))
+        except Exception as ex:
+            log.exception("Ошибка обучения стиля")
+            self.failed.emit(str(ex))
 
 
 class AutoWorker(QThread):
@@ -252,6 +269,7 @@ class MainWindow(QMainWindow):
         self._cost_per_mpx = 0.2       # оценка секунд на мегапиксель в быстром режиме (уточняется по замерам)
         self.params = EditParams()
         self.worker: AutoWorker | None = None
+        self.style_worker: StyleWorker | None = None
         self.export_worker: ExportWorker | None = None
         self.clip: dict | None = None          # скопированные настройки
         self.crop_mode = False
@@ -433,7 +451,7 @@ class MainWindow(QMainWindow):
         self.model_box = QComboBox()
         self.model_desc = _label(muted=True, wrap=True)
         self.model_box.currentIndexChanged.connect(self._model_changed)
-        self._model_list("iat_exposure")  # самая осторожная из моделей; без файла остаётся встроенная
+        self._model_list("scene_exposure")  # понимает сцену; без файла предложим скачать
         add_model = _button("Добавить свою…", self._model_add, tip="Подключить свою ONNX-модель: вид определится автоматически")
         self.del_model = _button("Удалить", self._model_remove)
         self._model_changed()
@@ -460,13 +478,65 @@ class MainWindow(QMainWindow):
         a.add(self.auto_exp_btn)
         a.add(srow)
         a.add(_label("ИИ подбирает значения ползунков с защитой светов от пересвета. Результат можно доточить на вкладке «Ручные».", muted=True, wrap=True))
+        self.style_model = style.load()
+        self.style_train_btn = _button("Обучить на моих правках", self.train_style, tip="Приложение посмотрит, как вы правили кадры в каталоге, и запомнит ваши привычки")
+        self.style_apply_btn = _button("Применить мой стиль", self.apply_style, True)
+        self.style_info = _label(muted=True, wrap=True)
+        self._style_info()
+        st = Section("Мой стиль")
+        st.add(self.style_apply_btn)
+        st.add(self.style_train_btn)
+        st.add(self.style_info)
         w = QWidget()
         lay = QVBoxLayout(w)
         lay.setContentsMargins(0, 6, 0, 0)
         lay.addWidget(m)
         lay.addWidget(a)
+        lay.addWidget(st)
         lay.addStretch()
         return w
+
+    def _style_info(self):
+        m = self.style_model
+        self.style_apply_btn.setEnabled(m is not None)
+        if m is None:
+            self.style_info.setText(f"Отредактируйте не меньше {style.MIN_PHOTOS} фото из каталога по-своему, затем нажмите «Обучить»: ИИ перенимает ваши привычки (экспозиция, тени, тепло и т. д.).")
+        else:
+            q = "заметно помогает" if m.gain > 0.25 else "пока слабо отличается от ваших средних настроек" if m.gain > 0.05 else "закономерностей пока почти нет, но средние привычки применяются"
+            self.style_info.setText(f"Обучено на {m.n} фото; проверка на невиденных кадрах: {q} (точность {max(m.gain, 0):.0%}). Чем больше правок, тем лучше.")
+
+    def train_style(self):
+        if self.style_worker and self.style_worker.isRunning():
+            return
+        self.style_train_btn.setEnabled(False)
+        self.status.setText("Изучаю ваши правки…")
+        self.style_worker = StyleWorker(list(self.lib.entries))
+        self.style_worker.done.connect(self._style_trained)
+        self.style_worker.failed.connect(lambda m: (self.style_train_btn.setEnabled(True), self.status.setText(f"Ошибка: {m}")))
+        self.style_worker.start()
+
+    def _style_trained(self, model):
+        self.style_train_btn.setEnabled(True)
+        if model is None:
+            n = sum(1 for e in self.lib.entries if style.is_edited(e.params))
+            self.status.setText(f"Мало правок: отредактировано {n}, нужно минимум {style.MIN_PHOTOS}")
+            return
+        self.style_model = model
+        style.save(model)
+        self._style_info()
+        self.status.setText(f"Стиль обучен на {model.n} фото")
+
+    def apply_style(self):
+        if self.preview is None or self.style_model is None:
+            self.status.setText("Сначала откройте фото" if self.preview is None else "Сначала обучите стиль")
+            return
+        k = self.auto_strength.value() / 100
+        for key, v in self.style_model.predict(style.style_features(self.preview)).items():
+            setattr(self.params, key, float(np.clip(v * k, -3 if key == "exposure" else -1, 3 if key == "exposure" else 1)))
+        self._sync_ui()
+        self.render()
+        self._commit_timer.start()
+        self.status.setText(f"Мой стиль: {self.params.exposure:+.2f} EV")
 
     def _model_list(self, select: str | None = None):
         self.model_box.blockSignals(True)
@@ -1261,7 +1331,7 @@ class MainWindow(QMainWindow):
         self.strip.shutdown()
         for w in self._fprev_workers:
             w.requestInterruption()  # значки фильтров не нужно дорисовывать при закрытии
-        for w in (*self._fprev_workers, self.worker, self.export_worker, self.hq_worker):
+        for w in (*self._fprev_workers, self.worker, self.export_worker, self.hq_worker, self.style_worker):
             if w and w.isRunning():
                 w.wait(8000)
         super().closeEvent(ev)
@@ -1381,7 +1451,7 @@ class MainWindow(QMainWindow):
             if not spec.url:
                 self.status.setText(f"Для «{spec.name}» положите файл {spec.file} в папку models/")
                 return
-            if QMessageBox.question(self, "Скачать модель", f"Модель «{spec.name}» ещё не скачана ({spec.size_bytes / 1e6:.1f} МБ).\nСкачать с GitHub?") != QMessageBox.Yes:
+            if QMessageBox.question(self, "Скачать модель", f"Модель «{spec.name}» ещё не скачана ({total_size(mid) / 1e6:.1f} МБ).\nСкачать с GitHub?") != QMessageBox.Yes:
                 return
             self.status.setText("Скачиваю модель…")
             self.dl_worker = DownloadWorker(mid)
@@ -1413,7 +1483,7 @@ class MainWindow(QMainWindow):
         self._sync_ui()
         self.render()
         self._commit_timer.start()
-        self.status.setText(f"Авто: {self.params.exposure:+.2f} EV" + (f", цвет {self.params.temperature:+.2f}/{self.params.tint:+.2f}" if "temperature" in sug else ""))
+        self.status.setText(sug.get("verdict") or f"Авто: {self.params.exposure:+.2f} EV" + (f", цвет {self.params.temperature:+.2f}/{self.params.tint:+.2f}" if "temperature" in sug else ""))
 
     # ---------- экспорт ----------
     def save_dialog(self):

@@ -1,6 +1,7 @@
 """Каталог ИИ-моделей и движки. Виды моделей:
   ev        — предсказывает поправку экспозиции в EV (вход "image" [1,3,224,224], выход [1,1]);
-  enhancer  — изображение в изображение (вход NCHW float32 0..1, выход того же размера), например IAT.
+  enhancer  — изображение в изображение (вход NCHW float32 0..1, выход того же размера), например IAT;
+  scene     — «понимает сцену»: эмбеддинг DINOv2 + статистика яркости -> поправка EV и тип сцены (см. app/ai/scene.py).
 Файл модели лежит в models/<file>. "Встроенная" эвристика работает без файла."""
 import json
 import logging
@@ -21,6 +22,7 @@ ENHANCE_SIDE = 1024  # длинная сторона, на которой раб
 
 
 RELEASE = "https://github.com/nikweel/photo-editor-ai/releases/download/models-v0.1/"
+RELEASE2 = "https://github.com/nikweel/photo-editor-ai/releases/download/models-v0.2/"
 ALLOWED_PREFIXES = ("https://github.com/", "file://")  # file:// — для тестов
 
 
@@ -28,12 +30,13 @@ ALLOWED_PREFIXES = ("https://github.com/", "file://")  # file:// — для те
 class ModelSpec:
     id: str
     name: str
-    kind: str          # "builtin" | "ev" | "enhancer"
+    kind: str          # "builtin" | "ev" | "enhancer" | "scene"
     file: str = ""
     url: str = ""      # откуда скачать; пусто — положите файл в models/ вручную
     desc: str = ""
     size_bytes: int = 0   # ожидаемый размер и SHA-256: скачанный файл проверяется до подключения
     sha256: str = ""
+    parts: tuple = ()  # дополнительные файлы, нужные модели: ((file, url, size, sha256), ...)
 
 
 BUILTIN_MODELS = {m.id: m for m in (
@@ -44,6 +47,10 @@ BUILTIN_MODELS = {m.id: m for m in (
     ModelSpec("iat_lowlight", "IAT — тёмные снимки", "enhancer", "iat_lowlight.onnx", RELEASE + "iat_lowlight.onnx",
               "Illumination-Adaptive Transformer, веса для съёмки при слабом свете (LOL)", 531698,
               "49f827779720c886d7ea99436d28effce10f905516cf3e81caca2969c2fc1e13"),
+    ModelSpec("scene_exposure", "Умная экспозиция (понимает сцену)", "scene", "exposure_scene.onnx", RELEASE2 + "exposure_scene.onnx",
+              "Отличает ночную сцену от пересвета, а портрет в темноте от задуманной темноты; обучена на 1800 свободных фото (DINOv2 + статистика яркости)",
+              243993, "cb9c14433f2ee13e1abe886abe2eba245a20f0e6e4910662417b7287107ed50a",
+              (("dinov2_small.onnx", RELEASE2 + "dinov2_small.onnx", 44397267, "3de1a4e5f3916da13c9367cf5873d8aebd048a23bbede3a91ff7b499b5ca1687"),)),
     ModelSpec("exposure_ev", "Своя модель EV", "ev", "exposure.onnx", desc="Ваша ONNX-модель по контракту выше"),
 )}
 
@@ -149,12 +156,22 @@ def download_model(model_id: str, progress=lambda f, m: None) -> Path:
     spec = models()[model_id]
     if not spec.url:
         raise ValueError("Для этой модели нет адреса загрузки: положите файл в папку models/")
+    for file, url, size, sha in spec.parts:  # сначала вспомогательные файлы (большой — эмбеддер)
+        if not (MODELS_DIR / file).exists():
+            fetch_verified(url, MODELS_DIR / file, size, sha, progress)
     return fetch_verified(spec.url, MODELS_DIR / spec.file, spec.size_bytes, spec.sha256, progress)
+
+
+def total_size(model_id: str) -> int:
+    """Сколько байт нужно скачать для модели (без уже лежащих файлов)."""
+    s = models()[model_id]
+    need = 0 if (MODELS_DIR / s.file).exists() else s.size_bytes
+    return need + sum(p[2] for p in s.parts if not (MODELS_DIR / p[0]).exists())
 
 
 def is_available(model_id: str) -> bool:
     s = models()[model_id]
-    return s.kind == "builtin" or (MODELS_DIR / s.file).exists()
+    return s.kind == "builtin" or ((MODELS_DIR / s.file).exists() and all((MODELS_DIR / p[0]).exists() for p in s.parts))
 
 
 def _session(spec: ModelSpec, device: str):
@@ -182,11 +199,12 @@ class Engine:
         self.spec = models()[model_id]
         self.session = None
         self.fixed_hw = None
+        self._embedder = None
         self._cpu = device == "cpu"  # уже на процессоре — запасного варианта нет
         if self.spec.kind != "builtin":
             self.session = _session(self.spec, device)  # ошибка загрузки (даже на процессоре) пробрасывается: пользователь выбрал именно эту модель
             shp = self.session.get_inputs()[0].shape
-            self.fixed_hw = (shp[2], shp[3]) if isinstance(shp[2], int) and isinstance(shp[3], int) else None  # модель с жёстким размером входа
+            self.fixed_hw = (shp[2], shp[3]) if len(shp) == 4 and isinstance(shp[2], int) and isinstance(shp[3], int) else None  # модель с жёстким размером входа
 
     def _run(self, feed: dict):
         """Расчёт на текущем устройстве; если GPU споткнулся прямо в работе, один раз пересоздаём сессию на процессоре и повторяем."""
@@ -198,6 +216,20 @@ class Engine:
             log.warning("Ошибка расчёта на GPU, переходим на процессор: %s", e)
             self.session, self._cpu = _session(self.spec, "cpu"), True
             return self.session.run(None, feed)
+
+    def scene_analyze(self, img: np.ndarray) -> tuple[float, str, float]:
+        """(поправка EV, тип сцены, уверенность 0..1) для kind == "scene"."""
+        from . import scene
+
+        if self._embedder is None:
+            part = self.spec.parts[0][0]
+            self._embedder = _session(ModelSpec("dinov2_backbone", "DINOv2", "ev", part), "cpu" if self._cpu else "auto")
+        feats = scene.features(self._embedder, img)[None]
+        ev, logits = self._run({"features": feats})
+        z = np.exp(logits.reshape(-1) - logits.max())
+        p = z / z.sum()
+        k = int(p.argmax())
+        return float(np.clip(ev.reshape(-1)[0], -exposure.MAX_EV, exposure.MAX_EV)), scene.CLASSES[k], float(p[k])
 
     @property
     def is_enhancer(self) -> bool:

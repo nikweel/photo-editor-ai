@@ -47,6 +47,21 @@ def _gray_world_gains(lin: np.ndarray) -> np.ndarray:
     return mean.mean() / np.maximum(mean, 1e-4)
 
 
+def _verdict(ev: float, kind: str) -> str:
+    name = scene_ru(kind)
+    if ev <= -0.3:
+        return f"{name}: кадр пересвечен, притемняю на {abs(ev):.1f} EV"
+    if ev >= 0.3:
+        return f"{name}: кадр тёмный, осветляю на {ev:.1f} EV"
+    return f"{name}: экспозиция в порядке" + (", темнота задумана — оставляю" if kind == "night" else "")
+
+
+def scene_ru(kind: str) -> str:
+    from .scene import CLASS_RU
+
+    return CLASS_RU.get(kind, kind).capitalize()
+
+
 def suggest(engine: Engine, img: np.ndarray, mode: str = "full") -> dict:
     """mode: "exposure" — только экспозиция; "full" — экспозиция и цвет. Результат: {параметр EditParams: значение}."""
     s = _small(img)
@@ -62,11 +77,18 @@ def suggest(engine: Engine, img: np.ndarray, mode: str = "full") -> dict:
         ratio = np.median(enh_lin.reshape(-1, 3), 0) / np.maximum(np.median(lin.reshape(-1, 3), 0), 1e-4)
         ratio = ratio / max(float(np.exp(np.log(np.maximum(ratio, 1e-4)).mean())), 1e-4)  # убираем часть, ответственную за яркость
         gains = np.sqrt(gains * ratio)  # цвет: среднее геометрическое оценки модели и серого мира
+    kind = None
+    if engine.spec.kind == "scene":
+        ev, kind, conf = engine.scene_analyze(s)  # модель сама решает, что кадр пересвечен, тёмный по замыслу или тёмный по ошибке
     ev = float(np.clip(min(ev, _ev_cap(lum)) if ev > 0 else ev, -MAX_EV, MAX_EV))
     out = {"exposure": 0.0 if abs(ev) < 0.1 else ev}
+    if kind:
+        out["scene"] = kind
+        out["verdict"] = _verdict(ev, kind)
     if mode == "full":
         temp, tint = _gains_to_wb(gains)
-        out["temperature"], out["tint"] = (temp * 0.5, tint * 0.5) if abs(temp) > 0.03 or abs(tint) > 0.03 else (0.0, 0.0)
+        k_wb = 0.25 if kind in ("night", "dusk") else 0.5  # цветные огни ночью и закатный свет — не ошибка баланса белого
+        out["temperature"], out["tint"] = (temp * k_wb, tint * k_wb) if abs(temp) > 0.03 or abs(tint) > 0.03 else (0.0, 0.0)
         sat = float(np.mean(s.max(-1) - s.min(-1)))
         out["vibrance"] = float(np.clip((0.28 - sat) * 0.8, 0, 0.25))
     return out
